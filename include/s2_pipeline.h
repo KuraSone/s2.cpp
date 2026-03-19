@@ -29,7 +29,8 @@ struct PipelineParams {
     GenerateParams gen;
 
     // Backend
-    int32_t npu_device = -1;   // -1 = CPU only
+    int32_t gpu_device = -1;   // -1 = CPU only
+    int32_t backend_type = -1; //0 = Vulkan; 1 = Cuda;
 };
 
 class Pipeline {

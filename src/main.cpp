@@ -32,7 +32,8 @@ int main(int argc, char ** argv) {
     params.tokenizer_path = "tokenizer.json";
     params.output_path = "out.wav";
     params.text = "Hello world";
-    params.npu_device = -1;
+    params.gpu_device = -1;
+    params.backend_type = -1;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -49,9 +50,9 @@ int main(int argc, char ** argv) {
         } else if (arg == "-o" || arg == "--output") {
             if (i + 1 < argc) params.output_path = argv[++i];
         } else if (arg == "-v" || arg == "--vulkan") {
-            if (i + 1 < argc) params.npu_device = std::stoi(argv[++i]); //Vulkan.
+            if (i + 1 < argc) params.gpu_device = std::stoi(argv[++i]); params.backend_type = 0; //Vulkan.
         } else if (arg == "-c" || arg == "--cuda") {
-            if (i + 1 < argc) params.npu_device = std::stoi(argv[++i]); //Cuda.
+            if (i + 1 < argc) params.gpu_device = std::stoi(argv[++i]); params.backend_type = 1; //Cuda.
         } else if (arg == "-threads") {
             if (i + 1 < argc) params.gen.n_threads = std::stoi(argv[++i]);
         } else if (arg == "-max-tokens") {

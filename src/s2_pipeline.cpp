@@ -13,14 +13,14 @@ bool Pipeline::init(const PipelineParams & params) {
         return false;
     }
 
-    if (!model_.load(params.model_path, params.npu_device)) {
+    if (!model_.load(params.model_path, params.gpu_device, params.backend_type)) {
         std::cerr << "Pipeline error: could not load model from " << params.model_path << std::endl;
         return false;
     }
 
     // Codec runs only twice per synthesis (encode ref audio + decode output),
     // not in the hot generation loop — always keep on CPU to save VRAM.
-    if (!codec_.load(params.model_path, /*vulkan_device=*/-1)) {
+    if (!codec_.load(params.model_path, -1, -1)) {
         std::cerr << "Pipeline error: could not load codec from " << params.model_path << std::endl;
         return false;
     }
