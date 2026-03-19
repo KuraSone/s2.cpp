@@ -92,6 +92,14 @@ bool Pipeline::synthesize_raw(const PipelineParams & params, std::vector<float>&
     
     std::cout << "--- Pipeline Synthesize ---" << std::endl;
     std::cout << "Text: " << params.text << std::endl;
+    std::cout << "max_new_tokens: " << params.gen.max_new_tokens
+        << ", temperature: " << params.gen.temperature
+        << ", top_p: " << params.gen.top_p
+        << ", top_k: " << params.gen.top_k
+        << ", min_tokens_before_end: " << params.gen.min_tokens_before_end
+        << ", n_threads: " << params.gen.n_threads
+        << ", verbose: " << params.gen.verbose
+        << ", repeat_penalty: " << params.gen.repeat_penalty << std::endl;
 
     const int32_t num_codebooks = model_.hparams().num_codebooks;
 
