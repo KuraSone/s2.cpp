@@ -44,7 +44,7 @@ All variants include both the transformer weights and the audio codec in a singl
 - CMake ≥ 3.14
 - C++17 compiler (GCC ≥ 10, Clang ≥ 11, MSVC 2019+)
 - For Vulkan GPU support: Vulkan SDK and `glslc`
-- For CUDA GPU support: CUDA Toolkit ≥ 12.4 (12.5 recommended)
+- For CUDA GPU support: CUDA Toolkit ≥ 12.4
   - **MSVC 2019+ note:** MSVC 2019 and later require CUDA ≥ 12.4 when building GGML. Older CUDA versions will produce compiler compatibility errors; upgrade to 12.4+ to resolve them.
 
 ```bash
