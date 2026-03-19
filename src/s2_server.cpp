@@ -78,6 +78,7 @@ namespace s2
                 }
 
                 PipelineParams pipelineParams;
+                pipelineParams.gen = params.pipeline.gen;
 
                 if (!req.form.has_field("text"))
                 {
