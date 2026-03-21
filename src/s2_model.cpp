@@ -1,3 +1,4 @@
+#include "s2_config.h"
 #include "../include/s2_model.h"
 #include <iostream>
 #include <vector>
@@ -103,7 +104,7 @@ bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_
         {
             backend_ = ggml_backend_vk_init(static_cast<size_t>(gpu_device));
             if (!backend_) {
-                std::cerr << "[Model] Vulkan init failed, falling back to CPU." << std::endl;
+                if(!SuppressNonEssentialVerbosity) { std::cerr << "[Model] Vulkan init failed, falling back to CPU." << std::endl; }
             }
         }
 #endif
@@ -112,13 +113,13 @@ bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_
         {
             backend_ = ggml_backend_cuda_init(static_cast<size_t>(gpu_device));
             if (!backend_) {
-                std::cerr << "[Model] Cuda init failed, falling back to CPU." << std::endl;
+                if(!SuppressNonEssentialVerbosity) { std::cerr << "[Model] Cuda init failed, falling back to CPU." << std::endl; }
             }
         }
 #endif
         if (!backend_)
         {
-            std::cerr << "[Model] NPU not compiled, falling back to CPU." << std::endl;
+            if(!SuppressNonEssentialVerbosity) { std::cerr << "[Model] NPU not compiled, falling back to CPU." << std::endl; }
         }
     }
     if (!backend_) {
@@ -139,28 +140,28 @@ bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_
         return false;
     }
 
-    std::cout << "[Model] Reading metadata from " << gguf_path << std::endl;
+    if(!SuppressNonEssentialVerbosity) { std::cout << "[Model] Reading metadata from " << gguf_path << std::endl; }
 
     // Helpers to read GGUF metadata
     auto get_u32 = [&](const char * key, uint32_t def) -> uint32_t {
         int id = gguf_find_key(ctx_gguf, key);
-        if (id < 0) { std::cerr << "[GGUF] missing key: " << key << " (using default " << def << ")\n"; return def; }
+        if (id < 0) { if(!SuppressNonEssentialVerbosity) { std::cerr << "[GGUF] missing key: " << key << " (using default " << def << ")\n"; } return def; }
         uint32_t v = gguf_get_val_u32(ctx_gguf, id);
-        std::cout << "[GGUF] " << key << " = " << v << "\n";
+        if(!SuppressNonEssentialVerbosity) { std::cout << "[GGUF] " << key << " = " << v << "\n"; }
         return v;
     };
     auto get_f32 = [&](const char * key, float def) -> float {
         int id = gguf_find_key(ctx_gguf, key);
-        if (id < 0) { std::cerr << "[GGUF] missing key: " << key << " (using default " << def << ")\n"; return def; }
+        if (id < 0) { if(!SuppressNonEssentialVerbosity) { std::cerr << "[GGUF] missing key: " << key << " (using default " << def << ")\n"; } return def; }
         float v = gguf_get_val_f32(ctx_gguf, id);
-        std::cout << "[GGUF] " << key << " = " << v << "\n";
+        if(!SuppressNonEssentialVerbosity) { std::cout << "[GGUF] " << key << " = " << v << "\n"; }
         return v;
     };
     auto get_bool = [&](const char * key, bool def) -> bool {
         int id = gguf_find_key(ctx_gguf, key);
-        if (id < 0) { std::cerr << "[GGUF] missing key: " << key << " (using default " << (def?"true":"false") << ")\n"; return def; }
+        if (id < 0) { if(!SuppressNonEssentialVerbosity) { std::cerr << "[GGUF] missing key: " << key << " (using default " << (def?"true":"false") << ")\n"; } return def; }
         bool v = gguf_get_val_bool(ctx_gguf, id);
-        std::cout << "[GGUF] " << key << " = " << (v?"true":"false") << "\n";
+        if(!SuppressNonEssentialVerbosity) { std::cout << "[GGUF] " << key << " = " << (v?"true":"false") << "\n"; }
         return v;
     };
 
@@ -174,7 +175,7 @@ bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_
             std::string arch = gguf_get_val_str(ctx_gguf, arch_id);
             arch_prefix = arch + ".";
             hparams_.has_fast_decoder = (arch == "fish-speech");
-            std::cout << "[Model] Architecture: " << arch << std::endl;
+            if(!SuppressNonEssentialVerbosity) { std::cout << "[Model] Architecture: " << arch << std::endl; }
         }
     }
 
@@ -213,11 +214,13 @@ bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_
         hparams_.fast_has_project_in   = get_bool("fish_speech.fast_project_in", false);
     }
 
+    if(!SuppressNonEssentialVerbosity) { 
     std::cout << "[Model] Layers: " << hparams_.block_count
               << ", Dim: " << hparams_.embedding_length
               << ", Vocab: " << hparams_.vocab_size
               << ", head_count: " << hparams_.head_count
               << ", has_fast_decoder: " << hparams_.has_fast_decoder << std::endl;
+    }
 
     // ---------------------------------------------------------------------------
     // Load tensor pointers (metadata only — data loaded below)
@@ -345,7 +348,7 @@ bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_
     }
 #endif
 
-    std::cout << "[Model] Weights loaded. Total tensors: " << n_tensors << std::endl;
+    if(!SuppressNonEssentialVerbosity) { std::cout << "[Model] Weights loaded. Total tensors: " << n_tensors << std::endl; }
 
     gguf_free(ctx_gguf);
     return true;

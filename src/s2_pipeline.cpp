@@ -99,8 +99,8 @@ bool Pipeline::synthesize(const PipelineParams & params) {
     // 5. Decode
     // codec_.decode() receives codes in row-major (num_codebooks, n_frames),
     // which matches GenerateResult.codes layout.
-    std::vector<float> audio_out;
-    if (!codec_.decode(res.codes.data(), res.n_frames, params.gen.n_threads, audio_out)) {
+    std::vector<float> audio_out; int32_t audio_no_frames;
+    if (!codec_.decode(res.codes.data(), res.n_frames, params.gen.n_threads, audio_out, audio_no_frames)) {
         std::cerr << "Pipeline error: decode failed." << std::endl;
         return false;
     }

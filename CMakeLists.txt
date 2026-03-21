@@ -34,6 +34,7 @@ add_subdirectory(ggml)
 # s2 executable
 # ---------------------------------------------------------------------------
 set(S2_SOURCES
+    src/s2_export_api.cpp
     src/s2_audio.cpp
     src/s2_tokenizer.cpp
     src/s2_sampler.cpp
@@ -58,6 +59,9 @@ target_link_libraries(s2 PRIVATE ggml)
 
 if(S2_VULKAN)
     target_compile_definitions(s2 PRIVATE GGML_USE_VULKAN)
+endif()
+if(S2_CUDA)
+    target_compile_definitions(s2 PRIVATE GGML_USE_CUDA)
 endif()
 
 # Platform-specific

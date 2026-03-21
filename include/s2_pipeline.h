@@ -44,7 +44,7 @@ public:
     // Run synthesis: text (+ optional reference audio) → WAV
     bool synthesize(const PipelineParams & params);
 
-private:
+//private: //Removed so we can initialize the pipeline modularly.
     Tokenizer   tokenizer_;
     SlowARModel model_;
     AudioCodec  codec_;
