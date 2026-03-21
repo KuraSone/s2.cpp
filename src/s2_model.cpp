@@ -97,10 +97,8 @@ SlowARModel::~SlowARModel() {
 
 bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_t backend_type) {
     if (gpu_device >= 0) {
-
 #ifdef GGML_USE_VULKAN
-        if(!backend_ && backend_type == 0)
-        {
+        if (!backend_ && backend_type == 0) {
             backend_ = ggml_backend_vk_init(static_cast<size_t>(gpu_device));
             if (!backend_) {
                 std::cerr << "[Model] Vulkan init failed, falling back to CPU." << std::endl;
@@ -108,16 +106,14 @@ bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_
         }
 #endif
 #ifdef GGML_USE_CUDA
-        if(!backend_ && backend_type == 1)
-        {
+        if (!backend_ && backend_type == 1) {
             backend_ = ggml_backend_cuda_init(static_cast<size_t>(gpu_device));
             if (!backend_) {
                 std::cerr << "[Model] Cuda init failed, falling back to CPU." << std::endl;
             }
         }
 #endif
-        if (!backend_)
-        {
+        if (!backend_) {
             std::cerr << "[Model] NPU not compiled, falling back to CPU." << std::endl;
         }
     }

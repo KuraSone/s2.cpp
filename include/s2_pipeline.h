@@ -1,7 +1,4 @@
 #pragma once
-// s2_pipeline.h — End-to-end TTS pipeline
-//
-// Orchestrates: tokenize → encode reference → build prompt → generate → decode → WAV
 
 #include "s2_audio.h"
 #include "s2_codec.h"
@@ -15,22 +12,17 @@
 namespace s2 {
 
 struct PipelineParams {
-    // Paths
-    std::string model_path;       // unified GGUF
-    std::string tokenizer_path;   // tokenizer.json
-
-    // Input
+    std::string model_path;
+    std::string tokenizer_path;
     std::string text;
     std::string prompt_text;
     std::string prompt_audio_path;
     std::string output_path;
-
-    // Generation
     GenerateParams gen;
-
-    // Backend
     int32_t gpu_device = -1;   // -1 = CPU only
     int32_t backend_type = -1; //0 = Vulkan; 1 = Cuda;
+    bool trim_silence = true;
+    bool normalize_output = true;
 };
 
 class Pipeline {
@@ -38,10 +30,7 @@ public:
     Pipeline();
     ~Pipeline();
 
-    // Load model + tokenizer + codec
     bool init(const PipelineParams & params);
-
-    // Run synthesis: text (+ optional reference audio) → WAV
     bool synthesize(const PipelineParams & params);
 
 private:
@@ -51,4 +40,4 @@ private:
     bool initialized_ = false;
 };
 
-} // namespace s2
+}
