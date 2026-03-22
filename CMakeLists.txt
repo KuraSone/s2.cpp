@@ -56,7 +56,7 @@ target_include_directories(s2 PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party
     ${CMAKE_CURRENT_SOURCE_DIR}/ggml/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/ggml/src          # for ggml-common.h etc.
+    ${CMAKE_CURRENT_SOURCE_DIR}/ggml/src
 )
 
 target_link_libraries(s2 PRIVATE ggml)
@@ -64,10 +64,17 @@ target_link_libraries(s2 PRIVATE ggml)
 if(S2_VULKAN)
     target_compile_definitions(s2 PRIVATE GGML_USE_VULKAN)
 endif()
+if(S2_CUDA)
+    target_compile_definitions(s2 PRIVATE GGML_USE_CUDA)
+endif()
 
 # Platform-specific
 if(UNIX AND NOT APPLE)
     target_link_libraries(s2 PRIVATE pthread m)
+endif()
+
+if(WIN32)
+    target_link_libraries(s2 PRIVATE ws2_32 wsock32)
 endif()
 
 # Install

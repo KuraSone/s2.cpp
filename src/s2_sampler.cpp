@@ -5,7 +5,6 @@
 
 namespace s2 {
 
-// Helper: Softmax with optional temperature
 static void apply_softmax(std::vector<float> & probs, float temp = 1.0f) {
     if (probs.empty()) return;
     float max_val = *std::max_element(probs.begin(), probs.end());
@@ -23,7 +22,6 @@ static void apply_softmax(std::vector<float> & probs, float temp = 1.0f) {
     }
 }
 
-// Sample a single token from logits
 int32_t sample_token(const float * logits, int32_t vocab_size, const SamplerParams & params,
                      int32_t always_include_id) {
     if (vocab_size <= 0) return 0;
@@ -34,17 +32,13 @@ int32_t sample_token(const float * logits, int32_t vocab_size, const SamplerPara
         items.push_back({logits[i], i});
     }
 
-    // Sort descending by logit
     std::sort(items.begin(), items.end(), [](const auto & a, const auto & b) {
         return a.first > b.first;
     });
 
-    // Top-K
     int32_t k = params.top_k > 0 ? std::min(params.top_k, vocab_size) : vocab_size;
     items.resize(k);
 
-    // Force-include always_include_id after top-k if it was excluded.
-    // This ensures EOS can always be sampled regardless of GPU precision differences.
     if (always_include_id >= 0 && always_include_id < vocab_size &&
         logits[always_include_id] > -1e30f)
     {
@@ -57,20 +51,20 @@ int32_t sample_token(const float * logits, int32_t vocab_size, const SamplerPara
         }
     }
 
-    // Re-sort so temperature/softmax and top-p see items in descending logit order
     std::sort(items.begin(), items.end(), [](const auto & a, const auto & b) {
         return a.first > b.first;
     });
 
     int32_t n = (int32_t)items.size();
 
-    // Apply temperature and softmax to get probabilities
+    if (params.temperature <= 0.0f) {
+        return items[0].second;
+    }
+
     std::vector<float> probs(n);
     for (int32_t i = 0; i < n; ++i) probs[i] = items[i].first;
     apply_softmax(probs, params.temperature);
 
-    // Top-P — items/probs are already sorted descending.
-    // Track always_include_id position so we can force it in even if top-p cuts it.
     int32_t always_pos = -1;
     if (always_include_id >= 0) {
         for (int32_t i = 0; i < n; ++i) {
@@ -87,21 +81,18 @@ int32_t sample_token(const float * logits, int32_t vocab_size, const SamplerPara
     }
     if (p_idx == 0) p_idx = 1;
 
-    // Force always_include_id past top-p cutoff if needed
     if (always_pos >= p_idx) p_idx = always_pos + 1;
 
     items.resize(p_idx);
     probs.resize(p_idx);
 
-    // Re-normalize after top-p truncation
     float sum_p = 0.0f;
     for (int32_t i = 0; i < p_idx; ++i) sum_p += probs[i];
     if (sum_p > 0) {
         for (int32_t i = 0; i < p_idx; ++i) probs[i] /= sum_p;
     }
 
-    // Sample using std::discrete_distribution
-    static std::mt19937 gen(std::random_device{}());
+    thread_local static std::mt19937 gen(std::random_device{}());
     std::discrete_distribution<int32_t> dist(probs.begin(), probs.end());
 
     int32_t sampled_idx = dist(gen);
@@ -120,10 +111,8 @@ int32_t RASSampler::sample(const float * logits, int32_t vocab_size,
     
     int32_t token = sample_token(logits, vocab_size, params);
     
-    // Check if token is within the repeating window
     if (!window_.empty() && token >= sem_begin && token < sem_end) {
         if (std::find(window_.begin(), window_.end(), token) != window_.end()) {
-            // It is a repetition. Resample with higher temperature/top_p.
             SamplerParams high_params = params;
             high_params.temperature = high_temp_;
             high_params.top_p = high_top_p_;
@@ -147,4 +136,4 @@ void RASSampler::reset() {
     window_.clear();
 }
 
-} // namespace s2
+}

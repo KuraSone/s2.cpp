@@ -2,58 +2,86 @@
 namespace fs = ghc::filesystem;
 #include "s2_pipeline.h"
 #include "s2_server.h"
-#include <iostream>
+
+#include <cstdio>
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <shellapi.h>
+#include <io.h>
+#include <fcntl.h>
+#else
+#include <clocale>
+#endif
+
+static void safe_print(const char* msg) {
+    fputs(msg, stdout);
+}
+
+static void safe_print_error(const char* msg) {
+    fputs(msg, stderr);
+}
+
 void print_uso() {
-    std::cout << "Usage: s2 [options]\n";
-    std::cout << "Options:\n";
-    std::cout << "  -m, --model <path>                  Path to unified GGUF model\n";
-    std::cout << "  -t, --tokenizer <path>              Path to tokenizer.json\n";
-    std::cout << "  -text <string>                      Text to synthesize\n";
-    std::cout << "  -pa, --prompt-audio <p>             Path to reference audio for cloning\n";
-    std::cout << "  -pt, --prompt-text <s>              Text of the reference audio for cloning\n";
-    std::cout << "  -o, --output <path>                 Output WAV path\n";
-    std::cout << "  -v, -c, --vulkan, --cuda <device>   Vulkan/Cuda device index (-1 for CPU)\n";
-    std::cout << "  -threads N                          Number of CPU threads for inference (default: 4)\n";
-    std::cout << "  -max-tokens N                       Max tokens to generate (default: 512, ~24s audio)\n";
-    std::cout << "  -temp F                             Sampling temperature (default: 0.7)\n";
-    std::cout << "  -top-p F                            Top-p sampling (default: 0.7)\n";
-    std::cout << "  -top-k N                            Top-k sampling (default: 30)\n";
-    std::cout << "  --server N                          Start http server\n";
-    std::cout << "  -H --host                           Server host\n";
-    std::cout << "  -P --port                           Server port\n";
+    safe_print("Usage: s2 [options]\n");
+    safe_print("Options:\n");
+    safe_print("  -m, --model        <path>   Path to GGUF model\n");
+    safe_print("  -t, --tokenizer    <path>   Path to tokenizer.json\n");
+    safe_print("  -text              <text>   Text to synthesize\n");
+    safe_print("  -pa, --prompt-audio <path>  Path to reference audio for cloning\n");
+    safe_print("  -pt, --prompt-text <text>   Text of the reference audio\n");
+    safe_print("  -o, --output       <path>   Output WAV path\n");
+    safe_print("  -v, -c, --vulkan, --cuda <id>   Vulkan/Cuda device index (-1 = CPU)\n");
+    safe_print("  -threads           <n>      Number of threads\n");
+    safe_print("  -max-tokens        <n>      Max tokens to generate\n");
+    safe_print("  --min-tokens-before-end <n> Minimum tokens before EOS is allowed\n");
+    safe_print("  -temp              <f>      Temperature\n");
+    safe_print("  -top-p             <f>      Top-p sampling\n");
+    safe_print("  -top-k             <n>      Top-k sampling\n");
+    safe_print("  --no-trim-silence           Keep trailing silence in output WAV\n");
+    safe_print("  --trim-silence              Trim trailing silence in output WAV\n");
+    safe_print("  --no-normalize              Keep original output peak level\n");
+    safe_print("  --normalize                 Peak-normalize output WAV to 0.95\n");
+    safe_print("  --server                    Start HTTP server\n");
+    safe_print("  -H, --host         <host>   Server host (default: 127.0.0.1)\n");
+    safe_print("  -P, --port         <port>   Server port (default: 3030)\n");
+    safe_print("  -h, --help                  Show this help\n");
 }
 
-inline void init_utf8_console() {
-    #ifdef _WIN32
-        #include <windows.h>
-        SetConsoleOutputCP(CP_UTF8);
-        SetConsoleCP(CP_UTF8);
-    #endif
-}
+int main(int argc, char** argv) {
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+    fflush(stdout);
+    fflush(stderr);
+    if (!_isatty(_fileno(stdout))) _setmode(_fileno(stdout), _O_BINARY);
+    if (!_isatty(_fileno(stderr))) _setmode(_fileno(stderr), _O_BINARY);
 
-int safe_parse_int(const std::string& str, const std::string& name, int default_value = 0) {
-    try {
-        return std::stoi(str);
-    } catch (...) {
-        std::cerr << "Invalid integer for " << name << ": " << str << "\n";
-        return default_value;
+    int argc_w;
+    LPWSTR* argv_w = CommandLineToArgvW(GetCommandLineW(), &argc_w);
+    static std::vector<std::string> args_utf8;
+    static std::vector<char*> new_argv;
+    if (argv_w != NULL) {
+        for (int i = 0; i < argc_w; i++) {
+            int size = WideCharToMultiByte(CP_UTF8, 0, argv_w[i], -1, NULL, 0, NULL, NULL);
+            std::vector<char> arg(size);
+            WideCharToMultiByte(CP_UTF8, 0, argv_w[i], -1, arg.data(), size, NULL, NULL);
+            args_utf8.emplace_back(arg.data());
+        }
+        LocalFree(argv_w);
+        for (auto& s : args_utf8) new_argv.push_back(s.data());
+        argv = new_argv.data();
+        argc = argc_w;
     }
-}
+#endif
 
-float safe_parse_float(const std::string& str, const std::string& name, float default_value = 0.0f) {
-    try {
-        return std::stof(str);
-    } catch (...) {
-        std::cerr << "Invalid float for " << name << ": " << str << "\n";
-        return default_value;
+#ifndef _WIN32
+    if (!std::setlocale(LC_ALL, "")) {
+        std::setlocale(LC_ALL, "C.UTF-8");
     }
-}
-
-int main(int argc, char ** argv) {
-    init_utf8_console();
+#endif
 
     if (argc < 2) {
         print_uso();
@@ -63,73 +91,59 @@ int main(int argc, char ** argv) {
     fs::u8arguments u8guard(argc, argv);
 
     s2::PipelineParams params;
-    // Default paths
     params.model_path = "model.gguf";
     params.tokenizer_path = "tokenizer.json";
     params.output_path = "out.wav";
-    params.text = "Hello world";
+    params.text = u8"Hello world";
     params.gpu_device = -1;
     params.backend_type = -1;
 
-    int32_t use_server = 0;
+    bool use_server = false;
     s2::ServerParams serverParams;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "-m" || arg == "--model") {
-            if (i + 1 < argc) params.model_path = argv[++i];
-        } else if (arg == "-t" || arg == "--tokenizer") {
-            if (i + 1 < argc) params.tokenizer_path = argv[++i];
-        } else if (arg == "-text") {
-            if (i + 1 < argc) params.text = argv[++i];
-        } else if (arg == "-pa" || arg == "--prompt-audio") {
-            if (i + 1 < argc) params.prompt_audio_path = argv[++i];
-        } else if (arg == "-pt" || arg == "--prompt-text") {
-            if (i + 1 < argc) params.prompt_text = argv[++i];
-        } else if (arg == "-o" || arg == "--output") {
-            if (i + 1 < argc) params.output_path = argv[++i];
-        } else if (arg == "-v" || arg == "--vulkan") {
-            if (i + 1 < argc) params.gpu_device = safe_parse_int(argv[++i], arg, params.gpu_device); params.backend_type = 0; //Vulkan.
-        } else if (arg == "-c" || arg == "--cuda") {
-            if (i + 1 < argc) params.gpu_device = safe_parse_int(argv[++i], arg, params.gpu_device); params.backend_type = 1; //Cuda.
-        } else if (arg == "-threads") {
-            if (i + 1 < argc) params.gen.n_threads = safe_parse_int(argv[++i], arg, params.gen.n_threads);
-        } else if (arg == "-max-tokens") {
-            if (i + 1 < argc) params.gen.max_new_tokens = safe_parse_int(argv[++i], arg, params.gen.max_new_tokens);
-        } else if (arg == "-temp") {
-            if (i + 1 < argc) params.gen.temperature = safe_parse_float(argv[++i], arg, params.gen.temperature);
-        } else if (arg == "-top-p") {
-            if (i + 1 < argc) params.gen.top_p = safe_parse_float(argv[++i], arg, params.gen.top_p);
-        } else if (arg == "-top-k") {
-            if (i + 1 < argc) params.gen.top_k = safe_parse_int(argv[++i], arg, params.gen.top_k);
-        } else if (arg == "--server") {
-            if (i + 1 < argc) use_server = safe_parse_int(argv[++i], arg, use_server);
-        } else if (arg == "-H" || arg == "--host") {
-            if (i + 1 < argc) serverParams.host = argv[++i];
-        } else if (arg == "-P" || arg == "--port") {
-            if (i + 1 < argc) serverParams.port = safe_parse_int(argv[++i], arg, serverParams.port);
-        } else if (arg == "-h" || arg == "--help") {
-            print_uso();
-            return 0;
+        if      (arg == "-m"  || arg == "--model")        { if (i+1 < argc) params.model_path        = argv[++i]; }
+        else if (arg == "-t"  || arg == "--tokenizer")    { if (i+1 < argc) params.tokenizer_path    = argv[++i]; }
+        else if (arg == "-text")                          { if (i+1 < argc) params.text               = argv[++i]; }
+        else if (arg == "-pa" || arg == "--prompt-audio") { if (i+1 < argc) params.prompt_audio_path = argv[++i]; }
+        else if (arg == "-pt" || arg == "--prompt-text")  { if (i+1 < argc) params.prompt_text        = argv[++i]; }
+        else if (arg == "-o"  || arg == "--output")       { if (i+1 < argc) params.output_path        = argv[++i]; }
+        else if (arg == "-v"  || arg == "--vulkan")       { if (i+1 < argc) { try { params.gpu_device = std::stoi(argv[++i]); } catch(...) {} params.backend_type = 0; } }
+        else if (arg == "-c"  || arg == "--cuda")         { if (i+1 < argc) { try { params.gpu_device = std::stoi(argv[++i]); } catch(...) {} params.backend_type = 1; } }
+        else if (arg == "-threads")                       { if (i+1 < argc) { try { params.gen.n_threads      = std::stoi(argv[++i]); } catch(...) {} } }
+        else if (arg == "-max-tokens")                    { if (i+1 < argc) { try { params.gen.max_new_tokens = std::stoi(argv[++i]); } catch(...) {} } }
+        else if (arg == "--min-tokens-before-end")        {
+            if (i+1 < argc) {
+                try {
+                    params.gen.min_tokens_before_end = std::stoi(argv[++i]);
+                    if (params.gen.min_tokens_before_end < 0) params.gen.min_tokens_before_end = 0;
+                } catch(...) {}
+            }
         }
+        else if (arg == "-temp")              { if (i+1 < argc) { try { params.gen.temperature = std::stof(argv[++i]); } catch(...) {} } }
+        else if (arg == "-top-p")             { if (i+1 < argc) { try { params.gen.top_p       = std::stof(argv[++i]); } catch(...) {} } }
+        else if (arg == "-top-k")             { if (i+1 < argc) { try { params.gen.top_k       = std::stoi(argv[++i]); } catch(...) {} } }
+        else if (arg == "--no-trim-silence")  { params.trim_silence     = false; }
+        else if (arg == "--trim-silence")     { params.trim_silence     = true;  }
+        else if (arg == "--no-normalize")     { params.normalize_output = false; }
+        else if (arg == "--normalize")        { params.normalize_output = true;  }
+        else if (arg == "--server")           { use_server = true; }
+        else if (arg == "-H" || arg == "--host") { if (i+1 < argc) serverParams.host = argv[++i]; }
+        else if (arg == "-P" || arg == "--port") { if (i+1 < argc) { try { serverParams.port = std::stoi(argv[++i]); } catch(...) {} } }
+        else if (arg == "-h" || arg == "--help") { print_uso(); return 0; }
     }
 
-    // If tokenizer path was not explicitly set, search for tokenizer.json in:
-    //   1. Same directory as the model file
-    //   2. Parent directory of the model file
-    //   3. Working directory (default fallback)
     if (params.tokenizer_path == "tokenizer.json") {
         std::string model_path = params.model_path;
         size_t slash = model_path.find_last_of("/\\");
         if (slash != std::string::npos) {
             std::string model_dir = model_path.substr(0, slash + 1);
-            // Check same dir as model
             std::string candidate = model_dir + "tokenizer.json";
             if (FILE * f = std::fopen(candidate.c_str(), "r")) {
                 std::fclose(f);
                 params.tokenizer_path = candidate;
             } else {
-                // Check parent dir
                 size_t parent_slash = model_dir.find_last_of("/\\", slash - 1);
                 if (parent_slash != std::string::npos) {
                     candidate = model_dir.substr(0, parent_slash + 1) + "tokenizer.json";
@@ -142,28 +156,28 @@ int main(int argc, char ** argv) {
         }
     }
 
-    if (use_server == 1)
-    {
-        serverParams.pipeline = params;
+    if (params.gen.max_new_tokens > 800) {
+        safe_print_error("Warning: -max-tokens > 800 may cause voice quality degradation. Consider splitting long texts.\n");
+    }
 
+    if (use_server) {
+        serverParams.pipeline = params;
         s2::Server server;
-        if (!server.serve(serverParams))
-        {
-            std::cerr << "Server initialization failed." << std::endl;
+        if (!server.serve(serverParams)) {
+            safe_print_error("Server initialization failed.\n");
             return 1;
         }
-        
         return 0;
     }
 
     s2::Pipeline pipeline;
     if (!pipeline.init(params)) {
-        std::cerr << "Pipeline initialization failed." << std::endl;
+        safe_print_error("Pipeline initialization failed.\n");
         return 1;
     }
 
     if (!pipeline.synthesize(params)) {
-        std::cerr << "Synthesis failed." << std::endl;
+        safe_print_error("Synthesis failed.\n");
         return 1;
     }
 

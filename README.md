@@ -29,11 +29,16 @@ GGUF files are available at [rodrigomt/s2-pro-gguf](https://huggingface.co/rodri
 
 | File | Size | Notes |
 |---|---|---|
-| `s2-pro-f16.gguf` | 9.3 GB | Full precision — reference quality |
-| `s2-pro-q8_0.gguf` | 5.7 GB | Near-lossless — recommended for 8+ GB VRAM |
-| `s2-pro-q6_k.gguf` | 4.8 GB | Good quality/size balance — recommended for 6+ GB VRAM |
+| `s2-pro-f16.gguf` | 9.9 GB | Full precision — reference quality |
+| `s2-pro-q8_0.gguf` | 5.6 GB | Near-lossless — recommended for 8+ GB VRAM |
+| `s2-pro-q6_k.gguf` | 4.5 GB | Good quality/size balance — recommended for 6+ GB VRAM |
+| `s2-pro-q5_k_m.gguf` | 4.0 GB | Smaller with still-good quality |
+| `s2-pro-q4_k_m.gguf` | 3.6 GB | Best compact variant so far in quick RU validation |
+| `s2-pro-q3_k.gguf` | 3.0 GB | Usable, but starts stretching short words |
+| `s2-pro-q2_k.gguf` | 2.6 GB | Lowest-size experimental variant |
 
 All variants include both the transformer weights and the audio codec in a single file.
+The quantized variants above were regenerated with the codec tensors (`c.*`) kept in `F16`, so only the AR transformer is quantized.
 
 ---
 
@@ -44,18 +49,18 @@ All variants include both the transformer weights and the audio codec in a singl
 - CMake ≥ 3.14
 - C++17 compiler (GCC ≥ 10, Clang ≥ 11, MSVC 2019+)
 - For Vulkan GPU support: Vulkan SDK and `glslc`
-- For CUDA GPU support: CUDA Toolkit ≥ 12.4
+- For CUDA/NVIDIA GPU support: CUDA Toolkit ≥ 12.4
   - **MSVC 2019+ note:** MSVC 2019 and later require CUDA ≥ 12.4 when building GGML. Older CUDA versions will produce compiler compatibility errors; upgrade to 12.4+ to resolve them.
 
 ```bash
 # Ubuntu / Debian
 sudo apt install cmake build-essential
 
-# Vulkan (optional, recommended for GPU acceleration on AMD/Intel/NVIDIA)
+# Vulkan (optional, for AMD/Intel GPU acceleration)
 sudo apt install vulkan-tools libvulkan-dev glslc
 
-# CUDA (optional, recommended for NVIDIA GPUs)
-# Install the CUDA Toolkit ≥ 12.4 from https://developer.nvidia.com/cuda-downloads
+# CUDA (optional, for NVIDIA GPU acceleration)
+# Install from https://developer.nvidia.com/cuda-downloads
 ```
 
 ### Runtime
@@ -80,26 +85,17 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel $(nproc)
 ```
 
-### With Vulkan GPU support
+### With Vulkan GPU support (AMD/Intel)
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DS2_VULKAN=ON
 cmake --build build --parallel $(nproc)
 ```
 
-### With CUDA GPU support
+### With CUDA GPU support (NVIDIA)
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DS2_CUDA=ON
-cmake --build build --parallel $(nproc)
-```
-
-### With both Vulkan and CUDA (select backend at runtime)
-
-You can compile with both backends enabled simultaneously and choose which one to use at runtime via `--vulkan` or `--cuda`:
-
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DS2_VULKAN=ON -DS2_CUDA=ON
 cmake --build build --parallel $(nproc)
 ```
 
@@ -135,49 +131,33 @@ Provide a short reference clip (5–30 seconds, WAV or MP3) and a transcript of 
   -o output.wav
 ```
 
-### GPU inference via Vulkan
+By default, the engine keeps a small `8`-token floor before `EOS`, trims trailing silence from the final WAV, and peak-normalizes the output to `0.95`. All three behaviors are optional and can be overridden from the CLI.
+
+### GPU inference via Vulkan (AMD/Intel)
 
 ```bash
 ./build/s2 \
   -m s2-pro-q6_k.gguf \
   -t tokenizer.json \
   -text "Text to synthesize." \
-  --vulkan 0 \
+  -v 0 \
   -o output.wav
 ```
 
-`--vulkan 0` selects the first Vulkan device. The transformer runs on GPU; the audio codec always runs on CPU (executes only twice per synthesis).
+`-v 0` selects the first Vulkan device.
 
-### GPU inference via CUDA
+### GPU inference via CUDA (NVIDIA)
 
 ```bash
 ./build/s2 \
   -m s2-pro-q6_k.gguf \
   -t tokenizer.json \
   -text "Text to synthesize." \
-  --cuda 0 \
+  -c 0 \
   -o output.wav
 ```
 
-`--cuda 0` selects the first CUDA device. As with Vulkan, the transformer runs on GPU and the audio codec on CPU.
-
-### Server
-
-```bash
-./build/s2 \
-  -m s2-pro-q6_k.gguf \
-  -t tokenizer.json \
-  --vulkan 0 \
-  --server 1 \
-  -H "127.0.0.1" \
-  -P 3000
-
-curl --location 'http://127.0.0.1:3000/generate' \
-  --form 'reference=928496226.wav' \
-  --form 'reference_text="Well... I was joking, but your conspicuous silence has been noted."' \
-  --form 'text="Hello World?"' \
-  --form 'params="{\"max_new_tokens\":2048,\"temperature\":0.58,\"top_p\":0.88,\"top_k\":40}"'
-```
+`-c 0` selects the first CUDA device. The transformer runs on GPU; the audio codec always runs on CPU (executes only twice per synthesis).
 
 ### All options
 
@@ -189,16 +169,60 @@ curl --location 'http://127.0.0.1:3000/generate' \
 | `-pa`, `--prompt-audio` | — | Reference audio file for voice cloning (WAV/MP3) |
 | `-pt`, `--prompt-text` | — | Transcript of the reference audio |
 | `-o`, `--output` | `out.wav` | Output WAV file path |
-| `--vulkan N` | — | Use Vulkan backend, device index N (e.g. `--vulkan 0`) |
-| `--cuda N` | — | Use CUDA backend, device index N (e.g. `--cuda 0`) |
+| `-v`, `--vulkan` | `-1` (CPU) | Vulkan device index (`-1` = CPU only) |
+| `-c`, `--cuda` | `-1` (CPU) | CUDA device index (`-1` = CPU only) |
 | `-threads N` | `4` | Number of CPU threads |
 | `-max-tokens N` | `512` | Max tokens to generate (~21s of audio per 440 tokens) |
+| `--min-tokens-before-end N` | `8` | Minimum generated tokens before `EOS` is allowed; use `0` to allow immediate stop |
 | `-temp F` | `0.7` | Sampling temperature |
 | `-top-p F` | `0.7` | Top-p nucleus sampling |
 | `-top-k N` | `30` | Top-k sampling |
-| `--server 1` | — | Start http server |
-| `-H`, `--host` | `127.0.0.1` | Server host |
+| `--trim-silence` / `--no-trim-silence` | `trim` enabled | Enable or disable trailing silence trimming on the saved WAV |
+| `--normalize` / `--no-normalize` | `normalize` enabled | Enable or disable peak normalization to `0.95` on the saved WAV |
+| `--server` | — | Start HTTP server instead of CLI synthesis |
+| `-H`, `--host` | `127.0.0.1` | Server bind address |
 | `-P`, `--port` | `3030` | Server port |
+
+Lower `--min-tokens-before-end` values reduce forced tail padding but increase the chance of very short outputs. Setting it to `0` gives the sampler full freedom to end immediately.
+
+---
+
+### HTTP server mode
+
+Start the server:
+
+```bash
+./build/s2 -m s2-pro-q6_k.gguf --server
+# or with custom host/port:
+./build/s2 -m s2-pro-q6_k.gguf --server -H 0.0.0.0 -P 8080
+```
+
+**`POST /generate`** — synthesize audio (multipart/form-data)
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | yes | Text to synthesize |
+| `reference` | file | no | Reference WAV for voice cloning |
+| `reference_text` | string | no | Transcript of the reference audio |
+| `params` | JSON string | no | Generation params: `max_new_tokens`, `temperature`, `top_p`, `top_k` |
+
+Returns `audio/wav`.
+
+```bash
+# Basic
+curl -X POST http://127.0.0.1:3030/generate \
+  --form "text=Hello world" \
+  --form 'params={"max_new_tokens":512,"temperature":0.58,"top_p":0.88,"top_k":40}' \
+  -o output.wav
+
+# With voice cloning
+curl -X POST http://127.0.0.1:3030/generate \
+  --form "reference=@reference.wav" \
+  --form "reference_text=Transcript of the reference." \
+  --form "text=Text to synthesize in that voice." \
+  --form 'params={"max_new_tokens":512,"temperature":0.58,"top_p":0.88,"top_k":40}' \
+  -o output.wav
+```
 
 ---
 
@@ -208,7 +232,8 @@ curl --location 'http://127.0.0.1:3000/generate' \
 |---|---|
 | ≥ 10 GB | `q8_0` — near-lossless quality |
 | 6–9 GB | `q6_k` — good quality/size balance |
-| < 6 GB | `f16` on CPU (slow) — no GPU variant at this quality level is currently available |
+| 5–7 GB | `q4_k_m` — best compact variant in current quick validation |
+| < 5 GB | `q3_k` or `q2_k` — experimental, quality drops faster |
 
 VRAM usage at runtime is approximately equal to the file size (transformer weights only; codec runs on CPU).
 
@@ -233,8 +258,16 @@ The C++ engine (`src/`) is built entirely on [ggml](https://github.com/ggml-org/
 - **Separate persistent `gallocr` allocators** for Slow-AR and Fast-AR — each path keeps its own compute buffer, avoiding memory re-planning per token
 - **Temporary prefill allocator** — freed immediately after prefill, so the large compute buffer does not persist into the generation loop
 - **Codec on CPU** — the audio codec executes exactly twice per synthesis (encode reference + decode output), so running it on CPU has zero impact on generation throughput
-- **posix_fadvise(DONTNEED)** after mmap — releases the GGUF file from kernel page cache after weights are loaded to VRAM, preventing RAM duplication equal to the model file size
+- **posix_fadvise(DONTNEED)** after loading the weights *(Linux only)* — advises the kernel to drop the GGUF file from page cache once the tensors are already in the backend buffer, reducing duplicate RAM use
 - **Correct ByteLevel tokenization** — the GPT-2 byte-to-unicode table is applied before BPE, producing token IDs identical to the HuggingFace reference tokenizer
+
+---
+
+## Tips
+
+### Long outputs
+
+Voice quality and amplitude tend to degrade after ~800 tokens (~37 s of audio). For longer texts, split into sentences and concatenate the resulting WAV files. By default, the engine applies peak normalisation on save to partially compensate, but splitting remains the most reliable approach.
 
 ---
 

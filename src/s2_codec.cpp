@@ -670,8 +670,7 @@ AudioCodec::~AudioCodec() {
 bool AudioCodec::load(const std::string & gguf_path, int32_t gpu_device, int32_t backend_type) {
     if (gpu_device >= 0) {
 #ifdef GGML_USE_VULKAN
-        if(!impl_->backend && backend_type == 0)
-        {
+        if (!impl_->backend && backend_type == 0) {
             impl_->backend = ggml_backend_vk_init(static_cast<size_t>(gpu_device));
             if (!impl_->backend) {
                 std::cerr << "[Codec] Vulkan init failed, falling back to CPU." << std::endl;
@@ -679,8 +678,7 @@ bool AudioCodec::load(const std::string & gguf_path, int32_t gpu_device, int32_t
         }
 #endif
 #ifdef GGML_USE_CUDA
-        if(!impl_->backend && backend_type == 1)
-        {
+        if (!impl_->backend && backend_type == 1) {
             impl_->backend = ggml_backend_cuda_init(static_cast<size_t>(gpu_device));
             if (!impl_->backend) {
                 std::cerr << "[Codec] Cuda init failed, falling back to CPU." << std::endl;
