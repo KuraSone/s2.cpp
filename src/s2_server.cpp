@@ -159,14 +159,14 @@ namespace s2
                 if (!pipeline.synthesize_to_memory(pipelineParams, const_cast<void**>(&ref_audio_buffer), &ref_audio_size, &wav_buffer, &wav_size))
                 {
                     std::cerr << "Synthesis failed." << std::endl;
-                    res.status = 500;
-                    res.set_content("Failed to create WAV", "text/plain");
+                    res.status = 400;
+                    res.set_content("Synthesis failed.", "text/plain");
                     return;
                 }
 
                 if (!wav_buffer || wav_size == 0)
                 {
-                    res.status = 500;
+                    res.status = 400;
                     res.set_content("Failed to create WAV", "text/plain");
                     return;
                 }

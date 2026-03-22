@@ -51,7 +51,6 @@ bool Pipeline::synthesize(const PipelineParams & params) {
     
         if (!load_audio(params.prompt_audio_path, ref_audio, codec_.sample_rate())) {
             std::cerr << "Pipeline warning: load_audio failed, running without reference audio." << std::endl;
-            return false;
         }
     }
 
@@ -78,7 +77,6 @@ bool Pipeline::synthesize_to_memory(const PipelineParams & params, void** ref_au
     
         if (!load_audio_from_memory(*ref_audio_buffer, *ref_audio_size, ref_audio, codec_.sample_rate())) {
             std::cerr << "Pipeline warning: load_audio failed, running without reference audio." << std::endl;
-            return false;
         }
     }
 
