@@ -94,32 +94,32 @@ namespace s2
 
                         if (j.contains("max_new_tokens")) {
                             int32_t val = j["max_new_tokens"].get<int32_t>();
-                            pipelineParams.gen.max_new_tokens = val;
+                            pipelineParams.gen.max_new_tokens = std::max(0, val);
                         }
 
                         if (j.contains("temperature")) {
                             float val = j["temperature"].get<float>();
-                            pipelineParams.gen.temperature = val;
+                            pipelineParams.gen.temperature = std::max(0.0f, val);
                         }
 
                         if (j.contains("top_p")) {
                             float val = j["top_p"].get<float>();
-                            pipelineParams.gen.top_p = val;
+                            pipelineParams.gen.top_p = std::max(0.0f, val);
                         }
 
                         if (j.contains("top_k")) {
                             int32_t val = j["top_k"].get<int32_t>();
-                            pipelineParams.gen.top_k = val;
+                            pipelineParams.gen.top_k = std::max(0, val);
                         }
 
                         if (j.contains("min_tokens_before_end")) {
                             int32_t val = j["min_tokens_before_end"].get<int32_t>();
-                            pipelineParams.gen.min_tokens_before_end = val;
+                            pipelineParams.gen.min_tokens_before_end = std::max(0, val);
                         }
 
                         if (j.contains("n_threads")) {
                             int32_t val = j["n_threads"].get<int32_t>();
-                            pipelineParams.gen.n_threads = val;
+                            pipelineParams.gen.n_threads = std::max(1, val);
                         }
 
                         if (j.contains("verbose")) {
@@ -129,7 +129,7 @@ namespace s2
 
                         if (j.contains("repeat_penalty")) {
                             float val = j["repeat_penalty"].get<float>();
-                            pipelineParams.gen.repeat_penalty = val;
+                            pipelineParams.gen.repeat_penalty = std::max(0.0f, val);;
                         }
                     }
                     catch (const json::parse_error& e) {
