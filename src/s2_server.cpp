@@ -183,7 +183,10 @@ namespace s2
 
         std::cout << "Server starting on http://" << params.host << ":" << params.port << "..." << std::endl;
 
-        svr.listen(params.host.c_str(), params.port);
+        if (!svr.listen(params.host.c_str(), params.port)) {
+            std::cerr << "Server not initialized." << std::endl;
+            return 0;
+        }
 
         return 1;
     }
