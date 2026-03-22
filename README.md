@@ -115,7 +115,7 @@ The binary is produced at `build/s2`.
   -o output.wav
 ```
 
-`tokenizer.json` is searched automatically in the same directory as the model file, then the parent directory, then the working directory.
+`tokenizer.json` is searched automatically in the same directory as the model file, then the parent directory. If not found in either, it falls back to `tokenizer.json` in the current working directory.
 
 ### Voice cloning with a reference audio
 
@@ -257,7 +257,7 @@ The C++ engine (`src/`) is built entirely on [ggml](https://github.com/ggml-org/
 
 - **Separate persistent `gallocr` allocators** for Slow-AR and Fast-AR — each path keeps its own compute buffer, avoiding memory re-planning per token
 - **Temporary prefill allocator** — freed immediately after prefill, so the large compute buffer does not persist into the generation loop
-- **Codec on CPU** — the audio codec executes exactly twice per synthesis (encode reference + decode output), so running it on CPU has zero impact on generation throughput
+- **Codec on CPU** — the audio codec executes once per synthesis (decode only) or twice when a reference audio is provided (encode reference + decode output), so running it on CPU has zero impact on generation throughput
 - **posix_fadvise(DONTNEED)** after loading the weights *(Linux only)* — advises the kernel to drop the GGUF file from page cache once the tensors are already in the backend buffer, reducing duplicate RAM use
 - **Correct ByteLevel tokenization** — the GPT-2 byte-to-unicode table is applied before BPE, producing token IDs identical to the HuggingFace reference tokenizer
 
@@ -267,7 +267,7 @@ The C++ engine (`src/`) is built entirely on [ggml](https://github.com/ggml-org/
 
 ### Long outputs
 
-Voice quality and amplitude tend to degrade after ~800 tokens (~37 s of audio). For longer texts, split into sentences and concatenate the resulting WAV files. By default, the engine applies peak normalisation on save to partially compensate, but splitting remains the most reliable approach.
+Voice quality and amplitude tend to degrade after ~800 tokens (~37 s of audio). For longer texts, split into sentences and concatenate the resulting WAV files. By default, the engine applies dynamic loudness normalization (windowed RMS) and peak normalization on save to partially compensate, but splitting remains the most reliable approach.
 
 ---
 
