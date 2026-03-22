@@ -118,8 +118,7 @@ bool Pipeline::synthesize_raw(const PipelineParams & params, AudioData & ref_aud
         << ", top_k: " << params.gen.top_k
         << ", min_tokens_before_end: " << params.gen.min_tokens_before_end
         << ", n_threads: " << params.gen.n_threads
-        << ", verbose: " << params.gen.verbose
-        << ", repeat_penalty: " << params.gen.repeat_penalty << std::endl;
+        << ", verbose: " << params.gen.verbose << std::endl;
 
     const int32_t num_codebooks = model_.hparams().num_codebooks;
 

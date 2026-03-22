@@ -106,11 +106,6 @@ namespace s2
                             bool val = j["verbose"].get<bool>();
                             pipelineParams.gen.verbose = val;
                         }
-
-                        if (j.contains("repeat_penalty")) {
-                            float val = j["repeat_penalty"].get<float>();
-                            pipelineParams.gen.repeat_penalty = std::max(0.0f, val);;
-                        }
                     }
                     catch (const json::parse_error& e) {
                         json err = { {"error", "JSON parse error"} };

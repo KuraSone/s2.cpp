@@ -21,7 +21,6 @@ void print_uso() {
     std::cout << "  -temp F                             Sampling temperature (default: 0.7)\n";
     std::cout << "  -top-p F                            Top-p sampling (default: 0.7)\n";
     std::cout << "  -top-k N                            Top-k sampling (default: 30)\n";
-    std::cout << "  --repeat-penalty F                  Penalize repeat sequence of tokens (default: 1.0 = disabled)\n";
     std::cout << "  --server N                          Start http server\n";
     std::cout << "  -H --host                           Server host\n";
     std::cout << "  -P --port                           Server port\n";
@@ -103,8 +102,6 @@ int main(int argc, char ** argv) {
             if (i + 1 < argc) params.gen.top_p = safe_parse_float(argv[++i], arg, params.gen.top_p);
         } else if (arg == "-top-k") {
             if (i + 1 < argc) params.gen.top_k = safe_parse_int(argv[++i], arg, params.gen.top_k);
-        } else if (arg == "--repeat-penalty") {
-            if (i + 1 < argc) params.gen.repeat_penalty = safe_parse_float(argv[++i], arg, params.gen.repeat_penalty);
         } else if (arg == "--server") {
             if (i + 1 < argc) use_server = safe_parse_int(argv[++i], arg, use_server);
         } else if (arg == "-H" || arg == "--host") {

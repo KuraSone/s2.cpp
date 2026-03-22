@@ -176,7 +176,7 @@ curl --location 'http://127.0.0.1:3000/generate' \
   --form 'reference=928496226.wav' \
   --form 'reference_text="Well... I was joking, but your conspicuous silence has been noted."' \
   --form 'text="Hello World?"' \
-  --form 'params="{\"max_new_tokens\":2048,\"temperature\":0.58,\"top_p\":0.88,\"top_k\":40, \"repeat_penalty\": 1.20 }"'
+  --form 'params="{\"max_new_tokens\":2048,\"temperature\":0.58,\"top_p\":0.88,\"top_k\":40}"'
 ```
 
 ### All options
@@ -196,7 +196,6 @@ curl --location 'http://127.0.0.1:3000/generate' \
 | `-temp F` | `0.7` | Sampling temperature |
 | `-top-p F` | `0.7` | Top-p nucleus sampling |
 | `-top-k N` | `30` | Top-k sampling |
-| `--repeat-penalty F` | `1.00` | Penalize repeat sequence of tokens |
 | `--server 1` | — | Start http server |
 | `-H`, `--host` | `127.0.0.1` | Server host |
 | `-P`, `--port` | `3030` | Server port |

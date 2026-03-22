@@ -68,7 +68,6 @@ GenerateResult generate(
         sparams.temperature     = params.temperature;
         sparams.top_p           = params.top_p;
         sparams.top_k           = params.top_k;
-        sparams.repeat_penalty  = params.repeat_penalty;
         // Pass im_end_id so it is always eligible for sampling when not blocked,
         // regardless of GPU numerical precision (fixes NVIDIA/NV_coopmat2 EOS dropout).
         const int32_t force_id = block_im_end ? -1 : im_end_id;
@@ -89,7 +88,6 @@ GenerateResult generate(
     sparams.temperature     = params.temperature;
     sparams.top_p           = params.top_p;
     sparams.top_k           = params.top_k;
-    sparams.repeat_penalty  = params.repeat_penalty;
 
     // RAS state
     std::vector<int32_t> ras_window;

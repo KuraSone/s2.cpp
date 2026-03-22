@@ -12,7 +12,6 @@ struct SamplerParams {
     float   temperature     = 0.7f;
     float   top_p           = 0.7f;
     int32_t top_k           = 30;
-    float   repeat_penalty  = 1.00f;
 };
 
 // Sample a single token from logits using top-k + top-p + temperature.
