@@ -35,6 +35,24 @@ inline void init_utf8_console() {
     #endif
 }
 
+int safe_parse_int(const std::string& str, const std::string& name, int default_value = 0) {
+    try {
+        return std::stoi(str);
+    } catch (...) {
+        std::cerr << "Invalid integer for " << name << ": " << str << "\n";
+        return default_value;
+    }
+}
+
+float safe_parse_float(const std::string& str, const std::string& name, float default_value = 0.0f) {
+    try {
+        return std::stof(str);
+    } catch (...) {
+        std::cerr << "Invalid float for " << name << ": " << str << "\n";
+        return default_value;
+    }
+}
+
 int main(int argc, char ** argv) {
     init_utf8_console();
 
@@ -72,27 +90,27 @@ int main(int argc, char ** argv) {
         } else if (arg == "-o" || arg == "--output") {
             if (i + 1 < argc) params.output_path = argv[++i];
         } else if (arg == "-v" || arg == "--vulkan") {
-            if (i + 1 < argc) params.gpu_device = std::stoi(argv[++i]); params.backend_type = 0; //Vulkan.
+            if (i + 1 < argc) params.gpu_device = safe_parse_int(argv[++i], arg, params.gpu_device); params.backend_type = 0; //Vulkan.
         } else if (arg == "-c" || arg == "--cuda") {
-            if (i + 1 < argc) params.gpu_device = std::stoi(argv[++i]); params.backend_type = 1; //Cuda.
+            if (i + 1 < argc) params.gpu_device = safe_parse_int(argv[++i], arg, params.gpu_device); params.backend_type = 1; //Cuda.
         } else if (arg == "-threads") {
-            if (i + 1 < argc) params.gen.n_threads = std::stoi(argv[++i]);
+            if (i + 1 < argc) params.gen.n_threads = safe_parse_int(argv[++i], arg, params.gen.n_threads);
         } else if (arg == "-max-tokens") {
-            if (i + 1 < argc) params.gen.max_new_tokens = std::stoi(argv[++i]);
+            if (i + 1 < argc) params.gen.max_new_tokens = safe_parse_int(argv[++i], arg, params.gen.max_new_tokens);
         } else if (arg == "-temp") {
-            if (i + 1 < argc) params.gen.temperature = std::stof(argv[++i]);
+            if (i + 1 < argc) params.gen.temperature = safe_parse_float(argv[++i], arg, params.gen.temperature);
         } else if (arg == "-top-p") {
-            if (i + 1 < argc) params.gen.top_p = std::stof(argv[++i]);
+            if (i + 1 < argc) params.gen.top_p = safe_parse_float(argv[++i], arg, params.gen.top_p);
         } else if (arg == "-top-k") {
-            if (i + 1 < argc) params.gen.top_k = std::stoi(argv[++i]);
+            if (i + 1 < argc) params.gen.top_k = safe_parse_int(argv[++i], arg, params.gen.top_k);
         } else if (arg == "--repeat-penalty") {
-            if (i + 1 < argc) params.gen.repeat_penalty = std::stof(argv[++i]);
+            if (i + 1 < argc) params.gen.repeat_penalty = safe_parse_float(argv[++i], arg, params.gen.repeat_penalty);
         } else if (arg == "--server") {
-            if (i + 1 < argc) use_server = std::stoi(argv[++i]);
+            if (i + 1 < argc) use_server = safe_parse_int(argv[++i], arg, use_server);
         } else if (arg == "-H" || arg == "--host") {
             if (i + 1 < argc) serverParams.host = argv[++i];
         } else if (arg == "-P" || arg == "--port") {
-            if (i + 1 < argc) serverParams.port = std::stoi(argv[++i]);
+            if (i + 1 < argc) serverParams.port = safe_parse_int(argv[++i], arg, serverParams.port);
         } else if (arg == "-h" || arg == "--help") {
             print_uso();
             return 0;
