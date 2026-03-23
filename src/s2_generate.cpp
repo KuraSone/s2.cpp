@@ -66,13 +66,10 @@ GenerateResult generate(
             biased[im_end_id] = -std::numeric_limits<float>::infinity();
         }
         SamplerParams sparams;
-        sparams.temperature = params.temperature;
-        sparams.top_p       = params.top_p;
-        sparams.top_k       = params.top_k;
-        // Pass im_end_id so it is always eligible for sampling when not blocked,
-        // regardless of GPU numerical precision (fixes NVIDIA/NV_coopmat2 EOS dropout).
-        const int32_t force_id = block_im_end ? -1 : im_end_id;
-        return sample_token(biased.data(), vocab_size, sparams, force_id);
+        sparams.temperature     = params.temperature;
+        sparams.top_p           = params.top_p;
+        sparams.top_k           = params.top_k;
+        return sample_token(biased.data(), vocab_size, sparams);
     };
 
     // Sample first main_token
@@ -86,9 +83,9 @@ GenerateResult generate(
     std::vector<float> fast_logits;
 
     SamplerParams sparams;
-    sparams.temperature = params.temperature;
-    sparams.top_p       = params.top_p;
-    sparams.top_k       = params.top_k;
+    sparams.temperature     = params.temperature;
+    sparams.top_p           = params.top_p;
+    sparams.top_k           = params.top_k;
 
     // RAS state
     std::vector<int32_t> ras_window;
@@ -119,8 +116,7 @@ GenerateResult generate(
             ras_sparams.temperature = ras_high_temp;
             ras_sparams.top_p       = ras_high_top_p;
             ras_sparams.top_k       = params.top_k;
-            const int32_t ras_force_id = (step < params.min_tokens_before_end) ? -1 : im_end_id;
-            main_token = sample_token(biased.data(), vocab_size, ras_sparams, ras_force_id);
+            main_token = sample_token(biased.data(), vocab_size, ras_sparams);
         }
 
         // Update RAS window
