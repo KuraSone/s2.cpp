@@ -1,4 +1,4 @@
-#include "s2_config.h"
+#include "../include/s2_config.h"
 #include "../include/s2_generate.h"
 #include <iostream>
 #include <limits>

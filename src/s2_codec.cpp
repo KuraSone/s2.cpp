@@ -1028,7 +1028,7 @@ bool AudioCodec::encode(const float * audio, int32_t n_samples, int32_t n_thread
 // ---------------------------------------------------------------------------
 
 bool AudioCodec::decode(const int32_t * codes, int32_t n_frames, int32_t n_threads,
-                         std::vector<float> & audio_out, int32_t & audio_n_frames_out) {
+                         std::vector<float> & audio_out, int32_t* audio_n_frames_out) {
     if (n_frames <= 0) return false;
 
     // Step 1: dequantize VQ codes to stage vector (n_frames, quantizer_input_dim)
@@ -1137,7 +1137,7 @@ bool AudioCodec::decode(const int32_t * codes, int32_t n_frames, int32_t n_threa
         ggml_gallocr_free(allocr);
         ggml_free(ctx);
 
-        audio_n_frames_out = n_samples;
+        *audio_n_frames_out = n_samples;
     }
     return true;
 }

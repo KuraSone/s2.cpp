@@ -36,9 +36,9 @@ public:
     bool synthesize(const PipelineParams & params);
 
     bool synthesize_to_memory(const PipelineParams & params, void** ref_audio_buffer, size_t* ref_audio_size, void** wav_buffer, size_t* wav_size);
-    bool synthesize_raw(const PipelineParams & params, AudioData & ref_audio, std::vector<float> & audio_out);
+    bool synthesize_raw(const PipelineParams & params, AudioData & ref_audio, std::vector<float> & audio_out, int32_t* audio_out_length);
 
-private:
+//private:
     Tokenizer   tokenizer_;
     SlowARModel model_;
     AudioCodec  codec_;

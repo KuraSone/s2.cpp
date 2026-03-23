@@ -1,4 +1,4 @@
-#include "s2_export_api.h"
+#include "../include/s2_export_api.h"
 
 s2::Pipeline* AllocS2Pipeline()
 {

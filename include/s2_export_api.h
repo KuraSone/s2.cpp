@@ -1,5 +1,4 @@
 #pragma once
-#define S2_Export __declspec(dllexport)
 
 #include "s2_audio.h"
 #include "s2_codec.h"
@@ -8,7 +7,7 @@
 #include "s2_tokenizer.h"
 #include "s2_pipeline.h"
 #include "s2_prompt.h"
-
+#include "s2_config.h"
 
 extern "C" 
 {

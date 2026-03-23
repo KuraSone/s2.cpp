@@ -64,8 +64,8 @@ bool Pipeline::synthesize(const PipelineParams & params) {
             safe_print_error_ln("Pipeline warning: load_audio failed, running without reference audio.");
         }
     }
-
-    if (!this->synthesize_raw(params, ref_audio, audio_out)) {
+    int32_t AudioOutFrames = 0;
+    if (!this->synthesize_raw(params, ref_audio, audio_out, &AudioOutFrames)) {
         safe_print_error_ln("Pipeline error: synthesis failed.");
         return false;
     }
@@ -105,7 +105,8 @@ bool Pipeline::synthesize_to_memory(const PipelineParams & params, void** ref_au
         }
     }
 
-    if (!this->synthesize_raw(params, ref_audio, audio_out)) {
+    int32_t AudioOutFrames = 0;
+    if (!this->synthesize_raw(params, ref_audio, audio_out, &AudioOutFrames)) {
         safe_print_error_ln("Pipeline error: synthesis failed.");
         return false;
     }
@@ -132,7 +133,7 @@ bool Pipeline::synthesize_to_memory(const PipelineParams & params, void** ref_au
     return true;
 }
 
-bool Pipeline::synthesize_raw(const PipelineParams & params, AudioData & ref_audio, std::vector<float>& audio_out) {
+bool Pipeline::synthesize_raw(const PipelineParams & params, AudioData & ref_audio, std::vector<float>& audio_out, int32_t* audio_out_length) {
     std::lock_guard<std::mutex> lock(synthesize_mutex_);
 
     if (!initialized_) {
@@ -177,7 +178,7 @@ bool Pipeline::synthesize_raw(const PipelineParams & params, AudioData & ref_aud
         return false;
     }
 
-    if (!codec_.decode(res.codes.data(), res.n_frames, params.gen.n_threads, audio_out)) {
+    if (!codec_.decode(res.codes.data(), res.n_frames, params.gen.n_threads, audio_out, audio_out_length)) {
         safe_print_error_ln("Pipeline error: decode failed.");
         return false;
     }

@@ -1,4 +1,4 @@
-#include "s2_config.h"
+#include "../include/s2_config.h"
 #include "../include/s2_model.h"
 #include <iostream>
 #include <vector>
