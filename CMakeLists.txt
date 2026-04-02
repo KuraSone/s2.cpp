@@ -67,6 +67,9 @@ endif()
 if(S2_CUDA)
     target_compile_definitions(s2 PRIVATE GGML_USE_CUDA)
 endif()
+if(S2_METAL)
+    target_compile_definitions(s2 PRIVATE GGML_USE_METAL)
+endif()
 
 # Platform-specific
 if(UNIX AND NOT APPLE)
