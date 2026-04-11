@@ -114,9 +114,20 @@ bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_
             }
         }
 #endif
+      
+#ifdef GGML_USE_METAL
+        if (!backend_ && backend_type == 2) {
+            backend_ = ggml_backend_metal_init();
+            if (!backend_) {
+                if (!SuppressNonEssentialVerbosity) {
+                    std::cerr << "[Model] Metal init failed, falling back to CPU." << std::endl;
+                }
+            }
+        }
+#endif
         if (!backend_)
         {
-            if(!SuppressNonEssentialVerbosity) { std::cerr << "[Model] NPU not compiled, falling back to CPU." << std::endl; }
+            if (!SuppressNonEssentialVerbosity) { std::cerr << "[Model] NPU not compiled, falling back to CPU." << std::endl; }
         }
     }
     if (!backend_) {
@@ -561,6 +572,9 @@ bool SlowARModel::eval_cached(const std::vector<int32_t> & flat_tokens,
         x = ggml_mul(ctx0, x, ggml_repeat(ctx0, token_scale, x));
     }
 
+    const int32_t n_kv = n_past_ + n_tokens;
+    ggml_tensor * kq_mask = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_kv, n_tokens);
+
     for (int32_t il = 0; il < hparams_.block_count; ++il) {
         const auto & layer = weights_.layers[il];
 
@@ -631,9 +645,7 @@ bool SlowARModel::eval_cached(const std::vector<int32_t> & flat_tokens,
         ggml_tensor * Q   = ggml_permute(ctx0, q,     0, 2, 1, 3);
         ggml_tensor * K   = ggml_permute(ctx0, k_rep, 0, 2, 1, 3);
         ggml_tensor * KQ  = mul_mat_checked(ctx0, K, Q, "mul_mat:kq");
-        ggml_tensor * KQs = ggml_scale(ctx0, KQ, attn_scale);
-        ggml_tensor * KQm = ggml_diag_mask_inf(ctx0, KQs, n_past_);
-        ggml_tensor * KQf = ggml_soft_max(ctx0, KQm);
+        ggml_tensor * KQf = ggml_soft_max_ext(ctx0, KQ, kq_mask, attn_scale, 0.0f);
 
         ggml_tensor * V       = ggml_cont(ctx0, ggml_permute(ctx0, v_rep, 1, 2, 0, 3));
         ggml_tensor * KQV     = mul_mat_checked(ctx0, V, KQf, "mul_mat:kqv");
@@ -667,6 +679,14 @@ bool SlowARModel::eval_cached(const std::vector<int32_t> & flat_tokens,
         ggml_free(ctx0);
         return false;
     }
+
+    std::vector<float> kq_mask_data((size_t)n_kv * n_tokens, -INFINITY);
+    for (int32_t i_q = 0; i_q < n_tokens; ++i_q) {
+        for (int32_t i_kv = 0; i_kv <= n_past_ + i_q; ++i_kv) {
+            kq_mask_data[(size_t)i_q * n_kv + i_kv] = 0.0f;
+        }
+    }
+    ggml_backend_tensor_set(kq_mask, kq_mask_data.data(), 0, kq_mask_data.size() * sizeof(float));
 
     ggml_backend_tensor_set(semantic_ids,  semantic_vals.data(), 0, n_tokens * sizeof(int32_t));
     ggml_backend_tensor_set(positions,     pos_vals.data(),       0, n_tokens * sizeof(int32_t));
@@ -770,6 +790,8 @@ bool SlowARModel::fast_decode(const std::vector<float> & hidden_in,
     std::vector<int32_t> pos_vals(n_tokens);
     for (int32_t i = 0; i < n_tokens; ++i) pos_vals[i] = i;
 
+    ggml_tensor * fast_kq_mask = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_tokens, n_tokens);
+
     for (int32_t il = 0; il < hparams_.fast_block_count; ++il) {
         const auto & layer = weights_.fast_layers[il];
 
@@ -803,9 +825,7 @@ bool SlowARModel::fast_decode(const std::vector<float> & hidden_in,
         ggml_tensor * Q   = ggml_permute(ctx0, q,     0, 2, 1, 3);
         ggml_tensor * K   = ggml_permute(ctx0, k_rep, 0, 2, 1, 3);
         ggml_tensor * KQ  = mul_mat_checked(ctx0, K, Q, "mul_mat:fast_kq");
-        ggml_tensor * KQs = ggml_scale(ctx0, KQ, attn_scale);
-        ggml_tensor * KQm = ggml_diag_mask_inf(ctx0, KQs, 0);
-        ggml_tensor * KQf = ggml_soft_max(ctx0, KQm);
+        ggml_tensor * KQf = ggml_soft_max_ext(ctx0, KQ, fast_kq_mask, attn_scale, 0.0f);
 
         ggml_tensor * V       = ggml_cont(ctx0, ggml_permute(ctx0, v_rep, 1, 2, 0, 3));
         ggml_tensor * KQV     = mul_mat_checked(ctx0, V, KQf, "mul_mat:fast_kqv");
@@ -837,6 +857,14 @@ bool SlowARModel::fast_decode(const std::vector<float> & hidden_in,
         ggml_free(ctx0);
         return false;
     }
+
+    std::vector<float> fast_kq_mask_data((size_t)n_tokens * n_tokens, -INFINITY);
+    for (int32_t i_q = 0; i_q < n_tokens; ++i_q) {
+        for (int32_t i_kv = 0; i_kv <= i_q; ++i_kv) {
+            fast_kq_mask_data[(size_t)i_q * n_tokens + i_kv] = 0.0f;
+        }
+    }
+    ggml_backend_tensor_set(fast_kq_mask, fast_kq_mask_data.data(), 0, fast_kq_mask_data.size() * sizeof(float));
 
     ggml_backend_tensor_set(hidden0,   hidden_in.data(),    0, hidden_in.size() * sizeof(float));
     ggml_backend_tensor_set(positions, pos_vals.data(),     0, pos_vals.size() * sizeof(int32_t));

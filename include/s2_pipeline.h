@@ -21,7 +21,7 @@ struct PipelineParams {
     std::string output_path;
     GenerateParams gen;
     int32_t gpu_device = -1;   // -1 = CPU only
-    int32_t backend_type = -1; //0 = Vulkan; 1 = Cuda;
+    int32_t backend_type = -1; //0 = Vulkan; 1 = Cuda; 2 = Metal;
     bool trim_silence = false;
     bool normalize_output = false;
     bool normalize_dynamic = false;
