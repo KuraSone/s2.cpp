@@ -1,3 +1,4 @@
+#include "../include/s2_config.h"
 #include "../include/s2_generate.h"
 #include <iostream>
 #include <limits>
@@ -47,7 +48,7 @@ GenerateResult generate(
 
     StepResult state;
     if (params.verbose) {
-        std::cout << "[Generate] Prefilling " << prompt.cols << " tokens..." << std::endl;
+        if(!SuppressNonEssentialVerbosity) { std::cout << "[Generate] Prefilling " << prompt.cols << " tokens..." << std::endl; }
     }
     if (!model.prefill(prompt_tm, prompt.cols, params.n_threads, state)) {
         std::cerr << "[Generate] Prefill failed." << std::endl;
@@ -93,7 +94,7 @@ GenerateResult generate(
     const float ras_high_top_p    = 0.9f;
 
     if (params.verbose) {
-        std::cout << "[Generate] Generating (max " << params.max_new_tokens << " tokens)..." << std::endl;
+        if(!SuppressNonEssentialVerbosity) { std::cout << "[Generate] Generating (max " << params.max_new_tokens << " tokens)..." << std::endl; }
     }
 
     int32_t step = 0;
@@ -170,7 +171,7 @@ GenerateResult generate(
 
         step++;
         if (params.verbose && step % 50 == 0) {
-            std::cout << "\r[Generate] " << step << " / " << params.max_new_tokens << " tokens..." << std::flush;
+            if(!SuppressNonEssentialVerbosity) { std::cout << "\r[Generate] " << step << " / " << params.max_new_tokens << " tokens..." << std::flush; }
         }
 
         // Apply semantic mask and sample next main token
@@ -179,8 +180,10 @@ GenerateResult generate(
     }
 
     if (params.verbose) {
+        if(!SuppressNonEssentialVerbosity) { 
         std::cout << std::endl;
         std::cout << "[Generate] Done: " << out.n_frames << " frames generated." << std::endl;
+        }
     }
 
     // Compact codes from (num_cb, max_tokens) stride to (num_cb, n_frames) row-major
