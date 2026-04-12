@@ -140,6 +140,16 @@ private:
     int32_t        n_past_     = 0;
     int32_t        n_gpu_layers_ = 0;
 
+    // F16 copies of embedding tensors for CUDA get_rows compatibility
+    // (CUDA get_rows only supports F16/F32/Q4_0/Q4_1/Q5_0/Q5_1/Q8_0)
+    struct {
+        ggml_context *       ctx = nullptr;
+        ggml_backend_buffer_t buf = nullptr;
+        ggml_tensor *        embeddings          = nullptr;
+        ggml_tensor *        codebook_embeddings = nullptr;
+        ggml_tensor *        fast_embeddings     = nullptr;
+    } emb_f16_;
+
     static bool backend_requires_single_token_semantic_prefill(ggml_backend_t gpu);
 
     bool eval_cached(const std::vector<int32_t> & flat_tokens,

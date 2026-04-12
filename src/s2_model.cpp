@@ -92,6 +92,8 @@ SlowARModel::~SlowARModel() {
     if (backend_gpu_ && backend_gpu_ != backend_) ggml_backend_free(backend_gpu_);
     if (backend_cpu_ && backend_cpu_ != backend_) ggml_backend_free(backend_cpu_);
     if (backend_)         ggml_backend_free(backend_);
+    if (emb_f16_.buf)     ggml_backend_buffer_free(emb_f16_.buf);
+    if (emb_f16_.ctx)     ggml_free(emb_f16_.ctx);
 }
 
 bool SlowARModel::backend_requires_single_token_semantic_prefill(ggml_backend_t gpu) {
@@ -152,34 +154,8 @@ bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_
         }
     }
 
-    // CUDA does not support ggml_get_rows for quantized types (e.g. Q4_K).
-    // When CUDA is active, we keep ALL weights on CPU so that embedding
-    // lookups via ggml_get_rows work correctly.  The compute still runs
-    // on CPU, but the crash is avoided.
-    // For non-CUDA GPU backends (Vulkan, Metal) we can offload to GPU.
-    bool is_cuda_backend = false;
-#ifdef GGML_USE_CUDA
-    is_cuda_backend = backend_gpu_ && ggml_backend_is_cuda(backend_gpu_);
-#endif
-    bool use_gpu_for_weights = backend_gpu_ && !is_cuda_backend;
-
-    if (use_gpu_for_weights) {
-        backend_ = backend_gpu_;
-    } else {
-        backend_ = backend_cpu_;
-        if (backend_gpu_) {
-            if (!SuppressNonEssentialVerbosity) {
-                std::cerr << "[Model] CUDA detected with quantized model — keeping weights on CPU "
-                          << "to avoid get_rows unsupported type error." << std::endl;
-            }
-        }
-    }
-
-    n_gpu_layers_ = 0; // will update after hparams load
-
-    if (!SuppressNonEssentialVerbosity) {
-        std::cerr << "[Model] Using " << (use_gpu_for_weights ? "GPU" : "CPU") << " for weights." << std::endl;
-    }
+    // Tentatively use GPU; we'll refine after inspecting tensor types below.
+    backend_ = backend_gpu_ ? backend_gpu_ : backend_cpu_;
 
     struct gguf_init_params params = { /*no_alloc=*/true, /*ctx=*/&weights_.ctx_w };
     gguf_context * ctx_gguf = gguf_init_from_file(gguf_path.c_str(), params);
@@ -262,9 +238,6 @@ bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_
         hparams_.fast_has_project_in   = get_bool("fish_speech.fast_project_in", false);
     }
 
-    // Update n_gpu_layers now that block_count is known
-    n_gpu_layers_ = use_gpu_for_weights ? hparams_.block_count : 0;
-
     if(!SuppressNonEssentialVerbosity) {
     std::cout << "[Model] Layers: " << hparams_.block_count
               << ", Dim: " << hparams_.embedding_length
@@ -345,14 +318,52 @@ bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_
     }
 
     // -----------------------------------------------------------------------
-    // Weight allocation
+    // Weight allocation — decide GPU vs CPU based on actual tensor types
     // -----------------------------------------------------------------------
-    // When CUDA is the selected backend, weights stay on CPU to avoid
-    // ggml_get_rows crashes with quantized tensor types.
-    // For other GPU backends (Vulkan, Metal), weights go to GPU.
+    // CUDA get_rows supports: F16, F32, BF16, Q4_0, Q4_1, Q5_0, Q5_1, Q8_0
+    // K-quants (Q2_K, Q3_K, Q4_K, Q5_K, Q6_K) are NOT supported by get_rows,
+    // but they ARE supported by mul_mat.  For K-quant models on CUDA we
+    // dequantize the embedding tensors to F16 so get_rows works, while
+    // keeping the layer weights quantized for efficient mul_mat on GPU.
+    bool use_gpu_for_weights = !!backend_gpu_;
+    bool need_f16_emb = false;
+    if (backend_gpu_) {
+#ifdef GGML_USE_CUDA
+        if (ggml_backend_is_cuda(backend_gpu_)) {
+            auto cuda_supports_get_rows = [](ggml_type t) -> bool {
+                switch (t) {
+                    case GGML_TYPE_F16:
+                    case GGML_TYPE_F32:
+                    case GGML_TYPE_BF16:
+                    case GGML_TYPE_Q4_0:
+                    case GGML_TYPE_Q4_1:
+                    case GGML_TYPE_Q5_0:
+                    case GGML_TYPE_Q5_1:
+                    case GGML_TYPE_Q8_0:
+                        return true;
+                    default:
+                        return false;
+                }
+            };
+            ggml_type emb_type = weights_.embeddings->type;
+            if (!cuda_supports_get_rows(emb_type)) {
+                need_f16_emb = true;
+                if (!SuppressNonEssentialVerbosity) {
+                    std::cerr << "[Model] CUDA get_rows unsupported for type "
+                              << ggml_type_name(emb_type)
+                              << " — dequantizing embeddings to F16 for GPU offload." << std::endl;
+                }
+            }
+        }
+#endif
+    }
 
-    // Update n_gpu_layers now that block_count is known
+    backend_ = (use_gpu_for_weights) ? backend_gpu_ : backend_cpu_;
     n_gpu_layers_ = use_gpu_for_weights ? hparams_.block_count : 0;
+
+    if (!SuppressNonEssentialVerbosity) {
+        std::cerr << "[Model] Using " << (use_gpu_for_weights ? "GPU" : "CPU") << " for weights." << std::endl;
+    }
 
     weights_.model_buf = ggml_backend_alloc_ctx_tensors(weights_.ctx_w, backend_);
     if (!weights_.model_buf) {
@@ -397,6 +408,66 @@ bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_
     tmp.clear();
     tmp.shrink_to_fit();
     std::fclose(f);
+
+    // -------------------------------------------------------------------
+    // For CUDA + K-quant: dequantize embedding tensors to F16 on GPU
+    // so that ggml_get_rows works. Layer weights stay quantized.
+    // -------------------------------------------------------------------
+    if (need_f16_emb) {
+        // Single context for all F16 embedding tensors
+        size_t ctx_size = ggml_tensor_overhead() * 4 + 4096;
+        ggml_init_params ep = { ctx_size, nullptr, true };
+        emb_f16_.ctx = ggml_init(ep);
+
+        emb_f16_.embeddings = ggml_new_tensor_2d(emb_f16_.ctx, GGML_TYPE_F16,
+            weights_.embeddings->ne[0], weights_.embeddings->ne[1]);
+        emb_f16_.codebook_embeddings = ggml_new_tensor_2d(emb_f16_.ctx, GGML_TYPE_F16,
+            weights_.codebook_embeddings->ne[0], weights_.codebook_embeddings->ne[1]);
+        if (weights_.fast_embeddings) {
+            emb_f16_.fast_embeddings = ggml_new_tensor_2d(emb_f16_.ctx, GGML_TYPE_F16,
+                weights_.fast_embeddings->ne[0], weights_.fast_embeddings->ne[1]);
+        }
+
+        emb_f16_.buf = ggml_backend_alloc_ctx_tensors(emb_f16_.ctx, backend_gpu_);
+        if (!emb_f16_.buf) {
+            std::cerr << "[Model] Warning: failed to alloc F16 embeddings on GPU." << std::endl;
+        } else {
+            // Dequantize each tensor: read from quantized tensor → float → F16 → set on GPU
+            auto dequant_set = [&](ggml_tensor * src, ggml_tensor * dst) {
+                if (!src || !dst) return;
+                const int64_t ncols = src->ne[0];
+                const int64_t nrows = ggml_nrows(src);
+                const int blck  = ggml_blck_size(src->type);
+                const int tsz   = ggml_type_size(src->type);
+                const auto * tr = ggml_get_type_traits(src->type);
+
+                std::vector<uint8_t> src_data(ggml_nbytes(src));
+                ggml_backend_tensor_get(src, src_data.data(), 0, src_data.size());
+
+                std::vector<float>       row32(ncols);
+                std::vector<ggml_fp16_t> row16(ncols);
+
+                for (int64_t r = 0; r < nrows; ++r) {
+                    const uint8_t * rp = src_data.data() + r * src->nb[1];
+                    for (int64_t c = 0; c < ncols; c += blck) {
+                        tr->to_float(rp + (c / blck) * tsz, row32.data() + c, blck);
+                    }
+                    for (int64_t i = 0; i < ncols; ++i)
+                        row16[i] = ggml_fp32_to_fp16(row32[i]);
+                    ggml_backend_tensor_set(dst, row16.data(),
+                        (size_t)r * dst->nb[1], (size_t)ncols * sizeof(ggml_fp16_t));
+                }
+            };
+
+            dequant_set(weights_.embeddings, emb_f16_.embeddings);
+            dequant_set(weights_.codebook_embeddings, emb_f16_.codebook_embeddings);
+            dequant_set(weights_.fast_embeddings, emb_f16_.fast_embeddings);
+
+            if (!SuppressNonEssentialVerbosity) {
+                std::cerr << "[Model] F16 embeddings created on GPU for K-quant model." << std::endl;
+            }
+        }
+    }
 
     // Advise the kernel to drop the file pages from page cache — the weights
     // are now in the backend buffer (VRAM) and we no longer need the cached
@@ -604,15 +675,17 @@ bool SlowARModel::eval_cached(const std::vector<int32_t> & flat_tokens,
         token_scale = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, 1, n_tokens);
     }
 
-    ggml_tensor * x = ggml_get_rows(ctx0, weights_.embeddings, semantic_ids);
+    ggml_tensor * emb_get = emb_f16_.embeddings ? emb_f16_.embeddings : weights_.embeddings;
+    ggml_tensor * x = ggml_get_rows(ctx0, emb_get, semantic_ids);
     if (x->type != GGML_TYPE_F32) x = ggml_cast(ctx0, x, GGML_TYPE_F32);
 
     std::vector<ggml_tensor *> cb_id_tensors(hparams_.num_codebooks);
     ggml_tensor * codebook_sum = nullptr;
+    ggml_tensor * cb_emb = emb_f16_.codebook_embeddings ? emb_f16_.codebook_embeddings : weights_.codebook_embeddings;
     for (int32_t cb = 0; cb < hparams_.num_codebooks; ++cb) {
         ggml_tensor * ids = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_tokens);
         cb_id_tensors[cb] = ids;
-        ggml_tensor * emb = ggml_get_rows(ctx0, weights_.codebook_embeddings, ids);
+        ggml_tensor * emb = ggml_get_rows(ctx0, cb_emb, ids);
         if (emb->type != GGML_TYPE_F32) emb = ggml_cast(ctx0, emb, GGML_TYPE_F32);
         codebook_sum = (codebook_sum == nullptr) ? emb : ggml_add(ctx0, codebook_sum, emb);
     }
@@ -834,7 +907,8 @@ bool SlowARModel::fast_decode(const std::vector<float> & hidden_in,
     ggml_tensor * prefix_ids = nullptr;
     if (!prefix_tokens.empty()) {
         prefix_ids = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, (int64_t)prefix_tokens.size());
-        ggml_tensor * prefix_emb = ggml_get_rows(ctx0, weights_.fast_embeddings, prefix_ids);
+        ggml_tensor * fast_emb = emb_f16_.fast_embeddings ? emb_f16_.fast_embeddings : weights_.fast_embeddings;
+        ggml_tensor * prefix_emb = ggml_get_rows(ctx0, fast_emb, prefix_ids);
         if (prefix_emb->type != GGML_TYPE_F32) {
             prefix_emb = ggml_cast(ctx0, prefix_emb, GGML_TYPE_F32);
         }

@@ -166,7 +166,7 @@ By default, the engine uses fish-speech-aligned sampling defaults: `--min-tokens
 
 `-c 0` selects the first CUDA device.
 
-> **CUDA + quantized models:** GGML's CUDA backend does not support `ggml_get_rows` for quantized tensor types (e.g. Q4_K, Q3_K). When a quantized model is loaded with `-c`, the engine automatically falls back to CPU for weight storage and compute to avoid a runtime crash. For GPU acceleration with quantized models, use Vulkan (`-v`) instead. The `q8_0` and `f16` formats work on CUDA without fallback.
+> **CUDA + quantized models:** The CUDA backend supports `ggml_get_rows` for F16, F32, BF16, Q4_0, Q4_1, Q5_0, Q5_1, and Q8_0. Models in these formats (including Q8_0) run fully on GPU with no fallback. K-quant variants (Q2_K, Q3_K, Q4_K, Q5_K, Q6_K) are not supported by `get_rows`; for these, the engine automatically dequantizes the embedding tables to F16 on GPU while keeping the layer weights quantized, so compute still benefits from CUDA-accelerated `mul_mat`.
 
 ### GPU inference via Metal (Apple Silicon, macOS)
 

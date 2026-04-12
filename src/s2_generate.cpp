@@ -180,7 +180,7 @@ GenerateResult generate(
     }
 
     if (params.verbose) {
-        if(!SuppressNonEssentialVerbosity) { 
+        if(!SuppressNonEssentialVerbosity) {
         std::cout << std::endl;
         std::cout << "[Generate] Done: " << out.n_frames << " frames generated." << std::endl;
         }
