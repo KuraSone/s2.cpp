@@ -15,7 +15,7 @@
 
 This repository contains:
 
-- **`s2.cpp`** — a self-contained C++17 inference engine built on [ggml](https://github.com/ggml-org/ggml), handling tokenization, Dual-AR generation, audio codec encode/decode, and WAV output with no Python dependency
+- **`s2.cpp`** — a self-contained C++17 inference engine built on [ggml](https://github.com/ggml-org/ggml) (v0.9.11), handling tokenization, Dual-AR generation, audio codec encode/decode, and WAV output with no Python dependency
 - **`tokenizer.json`** — Qwen3 BPE tokenizer with ByteLevel pre-tokenization
 - GGUF model files are **not included** here — see [Model variants](#model-variants) below
 
@@ -99,6 +99,13 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release -DS2_CUDA=ON
 cmake --build build --parallel $(nproc)
 ```
 
+### With Metal GPU support (Apple Silicon, macOS)
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DS2_METAL=ON
+cmake --build build --parallel $(nproc)
+```
+
 The binary is produced at `build/s2`.
 
 ---
@@ -144,7 +151,7 @@ By default, the engine uses fish-speech-aligned sampling defaults: `--min-tokens
   -o output.wav
 ```
 
-`-v 0` selects the first Vulkan device.
+`-v 0` selects the first Vulkan device. All model weights are loaded into GPU VRAM. The audio codec always runs on CPU (executes only twice per synthesis).
 
 ### GPU inference via CUDA (NVIDIA)
 
@@ -157,7 +164,25 @@ By default, the engine uses fish-speech-aligned sampling defaults: `--min-tokens
   -o output.wav
 ```
 
-`-c 0` selects the first CUDA device. The transformer runs on GPU; the audio codec always runs on CPU (executes only twice per synthesis).
+`-c 0` selects the first CUDA device.
+
+> **CUDA + quantized models:** GGML's CUDA backend does not support `ggml_get_rows` for quantized tensor types (e.g. Q4_K, Q3_K). When a quantized model is loaded with `-c`, the engine automatically falls back to CPU for weight storage and compute to avoid a runtime crash. For GPU acceleration with quantized models, use Vulkan (`-v`) instead. The `q8_0` and `f16` formats work on CUDA without fallback.
+
+### GPU inference via Metal (Apple Silicon, macOS)
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DS2_METAL=ON
+cmake --build build --parallel $(nproc)
+
+./build/s2 \
+  -m s2-pro-q6_k.gguf \
+  -t tokenizer.json \
+  -text "Text to synthesize." \
+  -M \
+  -o output.wav
+```
+
+`-M` enables the Metal backend. Tested and functional on Apple Silicon. Generation speed is still slower than Vulkan/CUDA — the pipeline runs correctly but expect higher latency per token compared to AMD or NVIDIA GPUs.
 
 ### All options
 
@@ -171,6 +196,7 @@ By default, the engine uses fish-speech-aligned sampling defaults: `--min-tokens
 | `-o`, `--output` | `out.wav` | Output WAV file path |
 | `-v`, `--vulkan` | `-1` (CPU) | Vulkan device index (`-1` = CPU only) |
 | `-c`, `--cuda` | `-1` (CPU) | CUDA device index (`-1` = CPU only) |
+| `-M`, `--metal` | — | Use Metal (Apple GPU, macOS only) |
 | `-threads N` | `4` | Number of CPU threads |
 | `-max-tokens N` | `1024` | Max tokens to generate |
 | `--min-tokens-before-end N` | `0` | Minimum generated tokens before `EOS` is allowed; `0` matches fish-speech default behavior |
@@ -234,6 +260,31 @@ curl -X POST http://127.0.0.1:3030/generate \
 
 ---
 
+### Shared library / DLL export API
+
+The engine can be built as a shared library (`.so` / `.dll`) with a C-compatible export API for integration into other applications:
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DS2_BUILD_SHARED_LIBRARIES=ON
+cmake --build build --parallel $(nproc)
+```
+
+This produces `s2_dll` (shared) and `s2_lib` (static) alongside the CLI executable. When built as a shared library on Windows, non-essential console output is suppressed automatically via `s2_config.h`.
+
+The export API (`s2_export_api.h` / `s2_export_api.cpp`, contributed by [@subspecs](https://github.com/subspecs)) exposes a modular C interface with the following capabilities:
+
+- **Separate lifecycle management** — model, tokenizer, codec, and pipeline can be loaded independently and reused across multiple synthesis calls without reloading
+- **Text-to-speech with or without voice cloning** — synthesize from text alone, or provide a reference audio file and transcript for voice cloning
+- **Audio output flexibility** — results can be saved to a WAV file, retrieved as a raw `float*` sample buffer in memory, or both simultaneously
+- **Precomputed reference codes** — reference audio can be encoded once and reused across generations, avoiding repeated encoding overhead when synthesizing multiple utterances with the same voice
+- **Cross-platform visibility** — `S2_Export` uses `__declspec(dllexport)` on Windows and `__attribute__((visibility("default")))` on GCC/Clang, so the same headers work across platforms
+
+Exported functions cover allocation/release (`AllocS2*` / `ReleaseS2*`), initialization (`InitializeS2*`), tokenizer-model config sync (`SyncS2TokenizerConfigFromS2Model`), reference audio pre-processing (`InitializeAudioPromptCodes`), raw audio buffer access (`AllocS2AudioBuffer` / `GetS2AudioBufferDataPointer`), and the main synthesis entry point (`S2Synthesize`).
+
+A community-maintained C# wrapper targeting .NET Standard 2.1 (Unity-compatible) is available at [subspecs/FishS2Sharp](https://github.com/subspecs/FishS2Sharp).
+
+---
+
 ## Choosing a model
 
 | VRAM available | Recommended model |
@@ -244,6 +295,8 @@ curl -X POST http://127.0.0.1:3030/generate \
 | < 5 GB | `q3_k` or `q2_k` — experimental, quality drops faster |
 
 VRAM usage at runtime is roughly on the order of the model size, but actual usage depends on backend buffers, KV cache length, and allocator overhead. The audio codec executes on CPU during inference.
+
+> **Note for CUDA users:** Quantized models (`q4_k_m`, `q3_k`, `q2_k`) fall back to CPU compute on CUDA due to the `ggml_get_rows` limitation. Use Vulkan (`-v`) for GPU acceleration with these models, or use `q8_0` / `f16` which work natively on CUDA.
 
 ---
 
@@ -261,13 +314,34 @@ Total: ~4.56B parameters.
 
 ## Implementation notes
 
-The C++ engine (`src/`) is built entirely on [ggml](https://github.com/ggml-org/ggml) (unmodified, pinned as a submodule). Key design decisions:
+The C++ engine (`src/`) is built on [ggml](https://github.com/ggml-org/ggml) v0.9.11 (pinned as a submodule). Key design decisions:
 
+- **Backend-aware weight allocation** — the engine detects the active backend at load time. Vulkan and Metal can store all weights on GPU. CUDA falls back to CPU for quantized models to avoid the `ggml_get_rows` unsupported-type crash. For non-CUDA backends, all weights go to GPU for maximum throughput.
 - **Separate persistent `gallocr` allocators** for Slow-AR and Fast-AR — each path keeps its own compute buffer, avoiding memory re-planning per token
 - **Temporary prefill allocator** — freed immediately after prefill, so the large compute buffer does not persist into the generation loop
 - **Codec on CPU** — the audio codec executes once per synthesis (decode only) or twice when a reference audio is provided (encode reference + decode output), so running it on CPU has zero impact on generation throughput
+- **Graceful CUDA fallback** — if CUDA initialization fails, the engine falls back to CPU automatically with a warning instead of aborting
+- **RAS (Rejection-Augmented Sampling)** — the generation loop includes a sliding-window repetition detector that resamples with higher temperature when tokens repeat within a 10-token window, reducing stuck-loop failures
 - **posix_fadvise(DONTNEED)** after loading the weights *(Linux only)* — advises the kernel to drop the GGUF file from page cache once the tensors are already in the backend buffer, reducing duplicate RAM use
 - **Correct ByteLevel tokenization** — the GPT-2 byte-to-unicode table is applied before BPE, producing token IDs identical to the HuggingFace reference tokenizer
+- **Thread-safe pipeline** — `Pipeline::synthesize_raw` is guarded by a mutex, allowing safe concurrent access from the HTTP server or external callers
+- **HTTP server** — built-in REST server (`--server`) with multipart form support for synthesis and voice cloning, powered by `cpp-httplib`
+
+### Source file index
+
+| File | Purpose |
+|---|---|
+| `src/main.cpp` | CLI argument parsing and entry point |
+| `src/s2_model.cpp` | Dual-AR model loading, weight allocation, prefill/step/fast_decode with KV cache |
+| `src/s2_codec.cpp` | Audio codec (encoder + decoder) with snake activations, ConvNext blocks, RVQ |
+| `src/s2_generate.cpp` | Generation loop with RAS, semantic masking, fast codebook decoding |
+| `src/s2_pipeline.cpp` | Orchestration: tokenizer + model + codec, audio I/O, mutex-guarded synthesis |
+| `src/s2_tokenizer.cpp` | Qwen3 BPE tokenizer with ByteLevel pre-tokenization |
+| `src/s2_sampler.cpp` | Temperature, top-p, top-k sampling |
+| `src/s2_prompt.cpp` | Prompt tensor construction for semantic and codebook tokens |
+| `src/s2_audio.cpp` | WAV read/write, silence trimming, normalization |
+| `src/s2_server.cpp` | HTTP server with `/generate` endpoint |
+| `src/s2_export_api.cpp` | C-exported shared library API |
 
 ---
 
@@ -281,11 +355,10 @@ Voice quality and amplitude tend to degrade after ~800 tokens (~37 s of audio). 
 
 ## Known limitations (alpha)
 
-- No streaming output — WAV is written only after full generation completes
-- No batch inference
 - Voice cloning quality depends heavily on reference audio length and SNR
+- CUDA backend falls back to CPU compute for quantized models (Q2_K through Q6_K) — Vulkan works natively with all quantization types
 - Windows: CUDA and Vulkan backends are supported; when using MSVC 2019+, ensure CUDA ≥ 12.4 is installed before building
-- macOS is untested
+- macOS: Metal backend is tested and works on Apple Silicon, but generation is noticeably slower than Vulkan/CUDA equivalents
 
 ---
 

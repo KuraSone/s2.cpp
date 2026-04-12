@@ -184,7 +184,7 @@ int S2Synthesize(s2::Pipeline* Pipeline, const s2::GenerateParams* GenerateParam
 		// codec_.decode() receives codes in row-major (num_codebooks, n_frames),
 		// which matches GenerateResult.codes layout.
 		std::vector<float>* audio_out = AudioBuffer == NULL ? new std::vector<float>() : AudioBuffer; int32_t audio_n_frames_out = 0;
-		if (!Pipeline->codec_.decode(res.codes.data(), res.n_frames, GenerateParams->n_threads, *audio_out, audio_n_frames_out)) {
+		if (!Pipeline->codec_.decode(res.codes.data(), res.n_frames, GenerateParams->n_threads, *audio_out, &audio_n_frames_out)) {
 			return -5; //Pipeline error: decode failed.
 		}
 		if(AudioBufferOutputLength != NULL) { *AudioBufferOutputLength = audio_n_frames_out; }

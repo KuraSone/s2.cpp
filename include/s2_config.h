@@ -17,4 +17,7 @@ static bool SuppressNonEssentialVerbosity = false;
 #else
 #define S2_Export
 #endif
+
+static bool SuppressNonEssentialVerbosity = false;
+
 #endif

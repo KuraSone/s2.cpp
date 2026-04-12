@@ -127,15 +127,20 @@ public:
 private:
     ModelHParams   hparams_;
     ModelWeights   weights_;
-    ggml_backend_t backend_      = nullptr;
-    ggml_gallocr_t allocr_       = nullptr;
-    ggml_gallocr_t fast_allocr_  = nullptr;
-    ggml_context * ctx_kv_      = nullptr;
+    ggml_backend_t backend_       = nullptr;
+    ggml_backend_t backend_gpu_   = nullptr;
+    ggml_backend_t backend_cpu_   = nullptr;
+    ggml_gallocr_t allocr_        = nullptr;
+    ggml_gallocr_t fast_allocr_   = nullptr;
+    ggml_context * ctx_kv_       = nullptr;
     ggml_backend_buffer_t kv_buf_ = nullptr;
     ggml_tensor *  memory_k_   = nullptr;
     ggml_tensor *  memory_v_   = nullptr;
     int32_t        max_seq_len_ = 0;
     int32_t        n_past_     = 0;
+    int32_t        n_gpu_layers_ = 0;
+
+    static bool backend_requires_single_token_semantic_prefill(ggml_backend_t gpu);
 
     bool eval_cached(const std::vector<int32_t> & flat_tokens,
                      int32_t n_tokens, int32_t n_threads,

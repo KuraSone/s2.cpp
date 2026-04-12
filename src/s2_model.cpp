@@ -89,7 +89,21 @@ SlowARModel::~SlowARModel() {
     if (weights_.model_buf) ggml_backend_buffer_free(weights_.model_buf);
     if (fast_allocr_)     ggml_gallocr_free(fast_allocr_);
     if (allocr_)          ggml_gallocr_free(allocr_);
+    if (backend_gpu_ && backend_gpu_ != backend_) ggml_backend_free(backend_gpu_);
+    if (backend_cpu_ && backend_cpu_ != backend_) ggml_backend_free(backend_cpu_);
     if (backend_)         ggml_backend_free(backend_);
+}
+
+bool SlowARModel::backend_requires_single_token_semantic_prefill(ggml_backend_t gpu) {
+    if (!gpu) return false;
+    // CUDA does not support ggml_get_rows for quantized types, so we
+    // process semantic prompt tokens one-by-one when running on CUDA.
+#ifdef GGML_USE_CUDA
+    return ggml_backend_is_cuda(gpu);
+#else
+    (void)gpu;
+    return false;
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -97,49 +111,75 @@ SlowARModel::~SlowARModel() {
 // ---------------------------------------------------------------------------
 
 bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_t backend_type) {
+    // Always init CPU backend first
+    backend_cpu_ = ggml_backend_cpu_init();
+    if (!backend_cpu_) {
+        std::cerr << "[Model] Failed to init CPU backend." << std::endl;
+        return false;
+    }
+
     if (gpu_device >= 0) {
 #ifdef GGML_USE_VULKAN
-        if (!backend_ && backend_type == 0) {
-            backend_ = ggml_backend_vk_init(static_cast<size_t>(gpu_device));
-            if (!backend_) {
+        if (!backend_gpu_ && backend_type == 0) {
+            backend_gpu_ = ggml_backend_vk_init(static_cast<size_t>(gpu_device));
+            if (!backend_gpu_) {
                 if(!SuppressNonEssentialVerbosity) { std::cerr << "[Model] Vulkan init failed, falling back to CPU." << std::endl; }
             }
         }
 #endif
 #ifdef GGML_USE_CUDA
-        if (!backend_ && backend_type == 1) {
-            backend_ = ggml_backend_cuda_init(static_cast<size_t>(gpu_device));
-            if (!backend_) {
+        if (!backend_gpu_ && backend_type == 1) {
+            backend_gpu_ = ggml_backend_cuda_init(static_cast<size_t>(gpu_device));
+            if (!backend_gpu_) {
                 if(!SuppressNonEssentialVerbosity) { std::cerr << "[Model] Cuda init failed, falling back to CPU." << std::endl; }
             }
         }
 #endif
-      
+
 #ifdef GGML_USE_METAL
-        if (!backend_ && backend_type == 2) {
-            backend_ = ggml_backend_metal_init();
-            if (!backend_) {
+        if (!backend_gpu_ && backend_type == 2) {
+            backend_gpu_ = ggml_backend_metal_init();
+            if (!backend_gpu_) {
                 if (!SuppressNonEssentialVerbosity) {
                     std::cerr << "[Model] Metal init failed, falling back to CPU." << std::endl;
                 }
             }
         }
 #endif
-        if (!backend_)
+        if (!backend_gpu_)
         {
             if (!SuppressNonEssentialVerbosity) { std::cerr << "[Model] NPU not compiled, falling back to CPU." << std::endl; }
         }
     }
-    if (!backend_) {
-        backend_ = ggml_backend_cpu_init();
-    }
-    if (!backend_) {
-        std::cerr << "[Model] Failed to init any GGML backend." << std::endl;
-        return false;
+
+    // CUDA does not support ggml_get_rows for quantized types (e.g. Q4_K).
+    // When CUDA is active, we keep ALL weights on CPU so that embedding
+    // lookups via ggml_get_rows work correctly.  The compute still runs
+    // on CPU, but the crash is avoided.
+    // For non-CUDA GPU backends (Vulkan, Metal) we can offload to GPU.
+    bool is_cuda_backend = false;
+#ifdef GGML_USE_CUDA
+    is_cuda_backend = backend_gpu_ && ggml_backend_is_cuda(backend_gpu_);
+#endif
+    bool use_gpu_for_weights = backend_gpu_ && !is_cuda_backend;
+
+    if (use_gpu_for_weights) {
+        backend_ = backend_gpu_;
+    } else {
+        backend_ = backend_cpu_;
+        if (backend_gpu_) {
+            if (!SuppressNonEssentialVerbosity) {
+                std::cerr << "[Model] CUDA detected with quantized model — keeping weights on CPU "
+                          << "to avoid get_rows unsupported type error." << std::endl;
+            }
+        }
     }
 
-    allocr_      = ggml_gallocr_new(ggml_backend_get_default_buffer_type(backend_));
-    fast_allocr_ = ggml_gallocr_new(ggml_backend_get_default_buffer_type(backend_));
+    n_gpu_layers_ = 0; // will update after hparams load
+
+    if (!SuppressNonEssentialVerbosity) {
+        std::cerr << "[Model] Using " << (use_gpu_for_weights ? "GPU" : "CPU") << " for weights." << std::endl;
+    }
 
     struct gguf_init_params params = { /*no_alloc=*/true, /*ctx=*/&weights_.ctx_w };
     gguf_context * ctx_gguf = gguf_init_from_file(gguf_path.c_str(), params);
@@ -222,7 +262,10 @@ bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_
         hparams_.fast_has_project_in   = get_bool("fish_speech.fast_project_in", false);
     }
 
-    if(!SuppressNonEssentialVerbosity) { 
+    // Update n_gpu_layers now that block_count is known
+    n_gpu_layers_ = use_gpu_for_weights ? hparams_.block_count : 0;
+
+    if(!SuppressNonEssentialVerbosity) {
     std::cout << "[Model] Layers: " << hparams_.block_count
               << ", Dim: " << hparams_.embedding_length
               << ", Vocab: " << hparams_.vocab_size
@@ -301,13 +344,25 @@ bool SlowARModel::load(const std::string & gguf_path, int32_t gpu_device, int32_
         return false;
     }
 
-    // Allocate backend buffer for all weight tensors
+    // -----------------------------------------------------------------------
+    // Weight allocation
+    // -----------------------------------------------------------------------
+    // When CUDA is the selected backend, weights stay on CPU to avoid
+    // ggml_get_rows crashes with quantized tensor types.
+    // For other GPU backends (Vulkan, Metal), weights go to GPU.
+
+    // Update n_gpu_layers now that block_count is known
+    n_gpu_layers_ = use_gpu_for_weights ? hparams_.block_count : 0;
+
     weights_.model_buf = ggml_backend_alloc_ctx_tensors(weights_.ctx_w, backend_);
     if (!weights_.model_buf) {
         std::cerr << "[Model] Failed to allocate backend buffer for weights." << std::endl;
         gguf_free(ctx_gguf);
         return false;
     }
+
+    allocr_      = ggml_gallocr_new(ggml_backend_get_default_buffer_type(backend_));
+    fast_allocr_ = ggml_gallocr_new(ggml_backend_get_default_buffer_type(backend_));
 
     // Load tensor data from GGUF file
     const size_t data_offset = gguf_get_data_offset(ctx_gguf);
