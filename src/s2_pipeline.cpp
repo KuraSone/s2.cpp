@@ -729,7 +729,6 @@ bool Pipeline::encode_prompt_audio(const std::string & audio_path, int32_t n_thr
         return false;
     }
 
-    safe_print_warn_ln("Encoding....");
     if (!codec().encode(ref_audio.samples.data(), static_cast<int32_t>(ref_audio.samples.size()),
                         n_threads, codes_out, n_frames_out)) {
         safe_print_warn_ln("Pipeline warning: encode failed, running without reference audio.");
@@ -737,7 +736,6 @@ bool Pipeline::encode_prompt_audio(const std::string & audio_path, int32_t n_thr
         n_frames_out = 0;
         return false;
     }
-    safe_print_warn_ln("Encoding.... done!");
 
     return true;
 }
