@@ -9,7 +9,9 @@ obj/
 *.a
 *.so
 *.d
+*.pyc
 compile_commands.json
+__pycache__/
 .cache/
 .claude/
 .qwen/
@@ -17,4 +19,5 @@ compile_commands.json
 ref_audio.*
 ref_text.*
 /voices
+/s2-pro/
 ggml
